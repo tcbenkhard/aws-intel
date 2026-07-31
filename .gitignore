@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv/
+
+# Build output
+build/
+dist/
+
+# IDEs and operating systems
+.idea/
+.DS_Store
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example

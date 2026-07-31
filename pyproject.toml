@@ -1,0 +1,39 @@
+[project]
+name = "aws-intel"
+version = "0.1.0"
+description = "A CLI tool for retrieving useful information from AWS."
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+authors = []
+keywords = ["aws", "cli"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = []
+
+[project.scripts]
+awsi = "aws_intel.cli:main"
+
+[tool.poetry]
+packages = [{ include = "aws_intel", from = "src" }]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3"
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
