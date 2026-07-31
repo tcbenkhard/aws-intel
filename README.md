@@ -4,6 +4,11 @@
 
 The project is in its initial development stage.
 
+Every invocation checks PyPI for a newer release. When an update is available,
+`awsi` writes a short upgrade notice to standard error so command output on
+standard output remains safe to pipe or parse. The check has a one-second
+timeout and is silently skipped when PyPI cannot be reached.
+
 ## Requirements
 
 - Python 3.10 or newer
@@ -140,7 +145,7 @@ the saved host and port mapping.
 List all saved definitions with:
 
 ```shell
-awsi forward configs
+awsi forward list
 ```
 
 List forwards started by `awsi` that still have a running process with:
@@ -183,8 +188,8 @@ is present. Listing requires `ssm:DescribeInstanceInformation` and
 `ec2:DescribeInstances`; starting a session requires the corresponding
 `ssm:StartSession` and session-channel permissions.
 
-`awsi forward NAME`, `awsi forward list`, `awsi forward --list`,
-`awsi forward --kill`, and `awsi forward --list-hosts` remain available as
+`awsi forward NAME`, `awsi forward --list`, `awsi forward --kill`, and
+`awsi forward --list-hosts` remain available as
 compatibility aliases, but the action-based forms above are the recommended
 interface. Forward names are positional; the former `--name` option is no
 longer supported.

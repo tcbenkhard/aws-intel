@@ -22,12 +22,21 @@ from aws_intel.security_groups.tree import (
     filter_tree,
     render_tree,
 )
+from aws_intel.version_check import notify_if_update_available
 
 SECURITY_GROUP_ID = re.compile(r"^sg-[0-9a-fA-F]{8,17}$")
 DEFAULT_SECURITY_GROUP_TREE_DEPTH = 1
 MAX_SECURITY_GROUP_TREE_DEPTH = 3
 EC2_INSTANCE_ID = re.compile(r"^i-[0-9a-fA-F]{8,17}$")
-FORWARD_ACTIONS = {"start", "save", "active", "stop", "hosts", "configs"}
+FORWARD_ACTIONS = {
+    "start",
+    "save",
+    "active",
+    "stop",
+    "hosts",
+    "list",
+    "configs",
+}
 
 
 class AwsIntelArgumentParser(argparse.ArgumentParser):
@@ -100,8 +109,6 @@ def _normalize_forward_arguments(arguments: Sequence[str]) -> list[str]:
     first = normalized[1]
     if first in FORWARD_ACTIONS or first in {"-h", "--help"}:
         return normalized
-    if first == "list":
-        return ["forward", "active", *normalized[2:]]
     legacy = normalized[1:]
     if "--list" in legacy:
         legacy.remove("--list")
@@ -212,7 +219,7 @@ def create_parser() -> AwsIntelArgumentParser:
             "  awsi forward active\n"
             "  awsi forward stop apigateway-dev\n"
             "  awsi forward hosts\n"
-            "  awsi forward configs"
+            "  awsi forward list"
         ),
     )
     forward_actions = forward.add_subparsers(
@@ -279,10 +286,11 @@ def create_parser() -> AwsIntelArgumentParser:
         epilog="Example:\n  awsi forward hosts",
     )
     forward_actions.add_parser(
-        "configs",
+        "list",
+        aliases=["configs"],
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="List saved forwarding configurations.",
-        epilog="Example:\n  awsi forward configs",
+        epilog="Example:\n  awsi forward list",
     )
     help_utility = utilities.add_parser(
         "help",
@@ -303,6 +311,7 @@ def create_parser() -> AwsIntelArgumentParser:
 
 def main(arguments: Sequence[str] | None = None) -> int:
     """Run the command-line application."""
+    notify_if_update_available(__version__)
     parser = create_parser()
     raw_arguments = list(sys.argv[1:] if arguments is None else arguments)
     parsed = parser.parse_args(_normalize_forward_arguments(raw_arguments))
@@ -421,7 +430,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     else f"{bastion.instance_id}\t{bastion.name}"
                 )
             return 0
-        if parsed.forward_action == "configs":
+        if parsed.forward_action in {"list", "configs"}:
             try:
                 saved_forwards = ForwardConfig().list()
             except ForwardConfigError as error:

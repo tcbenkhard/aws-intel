@@ -16,6 +16,27 @@ from aws_intel.forwarding.config import ForwardConfig
 from aws_intel.forwarding.model import ActiveForward, BastionHost, PortMapping
 
 
+@pytest.fixture(autouse=True)
+def disable_pypi_version_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep CLI tests deterministic and independent of the network."""
+    monkeypatch.setattr(
+        "aws_intel.cli.notify_if_update_available", lambda _version: None
+    )
+
+
+def test_each_invocation_checks_for_an_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checked_versions: list[str] = []
+    monkeypatch.setattr(
+        "aws_intel.cli.notify_if_update_available", checked_versions.append
+    )
+
+    assert main(["help"]) == 0
+
+    assert len(checked_versions) == 1
+
+
 def test_help_exits_successfully(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit) as exit_info:
         main(["--help"])
@@ -70,7 +91,7 @@ def test_help_utility_rejects_unknown_utility(
         (["forward", "active", "--help"], "awsi forward active"),
         (["forward", "stop", "--help"], "awsi forward stop apigateway-dev"),
         (["forward", "hosts", "--help"], "awsi forward hosts"),
-        (["forward", "configs", "--help"], "awsi forward configs"),
+        (["forward", "list", "--help"], "awsi forward list"),
     ],
 )
 def test_forward_help_includes_examples(
@@ -530,7 +551,9 @@ def test_forward_reports_unknown_saved_configuration(
     assert "no forward named 'missing'" in capsys.readouterr().err
 
 
-def test_forward_configs_lists_saved_definitions(
+@pytest.mark.parametrize("action", ["list", "configs"])
+def test_forward_list_lists_saved_definitions(
+    action: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -547,7 +570,7 @@ def test_forward_configs_lists_saved_definitions(
     )
     monkeypatch.chdir(tmp_path)
 
-    assert main(["forward", "configs"]) == 0
+    assert main(["forward", action]) == 0
     assert capsys.readouterr().out == (
         "NAME\tINSTANCE\tHOST\tPORT\n"
         "apigateway\tbastion\tapi.internal\t9072:443\n"
@@ -577,7 +600,7 @@ def test_forward_lists_active_background_sessions(
     )
 
 
-def test_forward_list_prints_column_names_when_empty(
+def test_legacy_forward_list_flag_prints_active_column_names_when_empty(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert main(["forward", "--list"]) == 0
