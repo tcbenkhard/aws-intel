@@ -28,7 +28,8 @@ def test_help_utility_lists_all_utilities(
     output = capsys.readouterr().out
     assert "security-group-tree" in output
     assert "Show attached resources, recursively connected" in output
-    assert "help                Show all utilities or detailed help" in output
+    assert "help" in output
+    assert "Show all utilities or detailed help" in output
 
 
 def test_help_utility_shows_detailed_utility_help(

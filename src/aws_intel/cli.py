@@ -62,6 +62,7 @@ def create_parser() -> AwsIntelArgumentParser:
     )
     security_group_tree = utilities.add_parser(
         "security-group-tree",
+        prog="awsi security-group-tree",
         help=(
             "Show attached resources, recursively connected security groups, "
             "and network ranges."
@@ -113,6 +114,7 @@ def create_parser() -> AwsIntelArgumentParser:
     )
     help_utility = utilities.add_parser(
         "help",
+        prog="awsi help",
         help="Show all utilities or detailed help for one utility.",
         description="Show all utilities or detailed help for one utility.",
     )
