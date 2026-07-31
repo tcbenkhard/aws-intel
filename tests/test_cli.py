@@ -14,6 +14,7 @@ from aws_intel.security_groups.model import (
 from aws_intel.cli import main
 from aws_intel.forwarding.config import ForwardConfig
 from aws_intel.forwarding.model import ActiveForward, BastionHost, PortMapping
+from aws_intel.forwarding.registry import ForwardRegistryError
 
 
 @pytest.fixture(autouse=True)
@@ -404,6 +405,19 @@ class FakeForwardRegistry:
     def list_active(self) -> tuple[object, ...]:
         return self.active
 
+    def ensure_startable(
+        self, instance_id: str, host: str, port_mapping: PortMapping
+    ) -> None:
+        for forward in self.active:
+            if isinstance(forward, ActiveForward) and (
+                forward.instance_id == instance_id
+                and forward.host == host
+                and forward.port_mapping == port_mapping
+            ):
+                raise ForwardRegistryError(
+                    f"this forward is already running with PID {forward.pid}"
+                )
+
     def terminate(self, reference: str) -> ActiveForward:
         for forward in self.active:
             if isinstance(forward, ActiveForward) and (
@@ -460,6 +474,40 @@ def test_forward_starts_requested_port_mapping(
     assert capsys.readouterr().out == (
         "Forward 'primary-database' started in the background with PID 4321.\n"
     )
+
+
+def test_forward_rejects_an_identical_active_forward(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    FakeForwardingGateway.starts = []
+    FakeForwardRegistry.active = (
+        ActiveForward(
+            9876,
+            "i-0123456789abcdef0",
+            "db.internal",
+            PortMapping(15432, 5432),
+            "primary-database",
+        ),
+    )
+    monkeypatch.setattr(
+        "aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway
+    )
+
+    result = main(
+        [
+            "forward",
+            "start",
+            "primary-database",
+            "--instance-id=i-0123456789abcdef0",
+            "--host=db.internal",
+            "--port=15432:5432",
+        ]
+    )
+
+    assert result == 1
+    assert FakeForwardingGateway.starts == []
+    assert "already running with PID 9876" in capsys.readouterr().err
 
 
 def test_forward_save_writes_configuration_without_starting(

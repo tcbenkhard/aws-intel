@@ -111,6 +111,10 @@ port. The command uses the
 the background, then prints a confirmation containing the process ID. The AWS
 CLI and its Session Manager plugin must be installed.
 
+Before starting, `awsi` rejects an identical forward that is already active
+and verifies that the requested local port is available. The command exits
+with an error instead of launching another session when either check fails.
+
 Save a named forward without resolving the instance or starting a session:
 
 ```shell

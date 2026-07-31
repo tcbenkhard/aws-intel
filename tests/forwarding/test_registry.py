@@ -53,6 +53,24 @@ def test_reports_invalid_saved_state(tmp_path: Path) -> None:
         ForwardRegistry(path).list_active()
 
 
+def test_rejects_an_identical_running_forward(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry = ForwardRegistry(tmp_path / "forwards.json")
+    forward = ActiveForward(
+        101, "i-11111111", "db.internal", PortMapping(15432, 5432), "database"
+    )
+    registry.add(forward)
+    monkeypatch.setattr(
+        "aws_intel.forwarding.registry.os.kill", lambda pid, value: None
+    )
+
+    with pytest.raises(ForwardRegistryError, match="already running with PID 101"):
+        registry.ensure_startable(
+            forward.instance_id, forward.host, forward.port_mapping
+        )
+
+
 def test_reads_registry_entries_saved_before_names_were_supported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -2,12 +2,14 @@
 
 from collections.abc import Callable
 import json
+import socket
 import subprocess
 
 from aws_intel.forwarding.model import BastionHost, PortMapping
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 ProcessStarter = Callable[..., subprocess.Popen[bytes]]
+LocalPortChecker = Callable[[int], bool]
 REMOTE_HOST_DOCUMENT = "AWS-StartPortForwardingSessionToRemoteHost"
 
 
@@ -22,9 +24,11 @@ class AwsCliForwardingGateway:
         self,
         runner: CommandRunner = subprocess.run,
         process_starter: ProcessStarter = subprocess.Popen,
+        local_port_checker: LocalPortChecker | None = None,
     ) -> None:
         self._runner = runner
         self._process_starter = process_starter
+        self._local_port_checker = local_port_checker or self._is_local_port_available
 
     def list_hosts(self) -> tuple[BastionHost, ...]:
         """Return online EC2 instances managed by Systems Manager."""
@@ -68,6 +72,10 @@ class AwsCliForwardingGateway:
         self, instance_id: str, host: str, port_mapping: PortMapping
     ) -> int:
         """Start a remote-host forwarding session in the background."""
+        if not self._local_port_checker(port_mapping.local_port):
+            raise ForwardingError(
+                f"local port {port_mapping.local_port} is already in use"
+            )
         try:
             process = self._process_starter(
                 [
@@ -99,6 +107,15 @@ class AwsCliForwardingGateway:
                 "AWS CLI was not found. Install it and ensure 'aws' is on PATH."
             ) from error
         return process.pid
+
+    @staticmethod
+    def _is_local_port_available(port: int) -> bool:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+                listener.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+        return True
 
     def resolve_instance_name(self, name: str) -> str:
         """Resolve an exact Name tag to one active EC2 instance ID."""

@@ -35,6 +35,20 @@ class ForwardRegistry:
             self._write(active)
         return tuple(active)
 
+    def ensure_startable(
+        self, instance_id: str, host: str, port_mapping: PortMapping
+    ) -> None:
+        """Reject a forward that is already represented by a running process."""
+        for forward in self.list_active():
+            if (
+                forward.instance_id == instance_id
+                and forward.host == host
+                and forward.port_mapping == port_mapping
+            ):
+                raise ForwardRegistryError(
+                    f"this forward is already running with PID {forward.pid}"
+                )
+
     def terminate(self, reference: str) -> ActiveForward:
         """Terminate one active forward, resolving names before process IDs."""
         forwards = list(self.list_active())

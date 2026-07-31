@@ -527,8 +527,10 @@ def main(arguments: Sequence[str] | None = None) -> int:
                         parsed.instance_name
                     )
             assert instance_id is not None
+            registry = ForwardRegistry()
+            registry.ensure_startable(instance_id, parsed.host, parsed.port)
             pid = gateway.start(instance_id, parsed.host, parsed.port)
-            ForwardRegistry().add(
+            registry.add(
                 ActiveForward(
                     pid, instance_id, parsed.host, parsed.port, forward_name
                 )

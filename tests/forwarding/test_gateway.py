@@ -83,7 +83,10 @@ def test_starts_remote_host_forward_in_background() -> None:
         calls.append((command, kwargs))
         return SimpleNamespace(pid=4321)  # type: ignore[return-value]
 
-    result = AwsCliForwardingGateway(process_starter=process_starter).start(
+    result = AwsCliForwardingGateway(
+        process_starter=process_starter,
+        local_port_checker=lambda port: True,
+    ).start(
         "i-0123456789abcdef0", "db.internal", PortMapping(15432, 5432)
     )
 
@@ -110,6 +113,29 @@ def test_starts_remote_host_forward_in_background() -> None:
     }
 
 
+def test_rejects_an_unavailable_local_port() -> None:
+    started = False
+
+    def process_starter(
+        command: list[str], **kwargs: object
+    ) -> subprocess.Popen[bytes]:
+        nonlocal started
+        started = True
+        return SimpleNamespace(pid=123)  # type: ignore[return-value]
+
+    with pytest.raises(ForwardingError, match="local port 15432"):
+        AwsCliForwardingGateway(
+            process_starter=process_starter,
+            local_port_checker=lambda port: False,
+        ).start(
+            "i-11111111",
+            "db.internal",
+            PortMapping(15432, 5432),
+        )
+
+    assert started is False
+
+
 def test_reports_missing_aws_cli_when_starting_forward() -> None:
     def process_starter(
         command: list[str], **kwargs: object
@@ -117,7 +143,10 @@ def test_reports_missing_aws_cli_when_starting_forward() -> None:
         raise FileNotFoundError
 
     with pytest.raises(ForwardingError, match="AWS CLI was not found"):
-        AwsCliForwardingGateway(process_starter=process_starter).start(
+        AwsCliForwardingGateway(
+            process_starter=process_starter,
+            local_port_checker=lambda port: True,
+        ).start(
             "i-0123456789abcdef0", "db.internal", PortMapping(15432, 5432)
         )
 
