@@ -53,7 +53,7 @@ def test_help_utility_lists_all_utilities(
 
     assert result == 0
     output = capsys.readouterr().out
-    assert "security-group-tree" in output
+    assert "security-group-tree  Show attached resources" in output
     assert "Show attached resources, recursively connected" in output
     assert "help" in output
     assert "Show all utilities or detailed help" in output
@@ -69,6 +69,10 @@ def test_help_utility_shows_detailed_utility_help(
     assert output.startswith("usage: awsi security-group-tree [-h] [--depth DEPTH]")
     assert "One or more starting security group IDs" in output
     assert "Maximum connection depth to expand" in output
+    assert "Examples:" in output
+    assert "awsi security-group-tree sg-0123456789abcdef0 --depth 2" in output
+    assert "awsi security-group-tree sg-0123456789abcdef0 --inbound" in output
+    assert "awsi security-group-tree sg-0123456789abcdef0 --filter database" in output
 
 
 def test_help_utility_rejects_unknown_utility(

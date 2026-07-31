@@ -46,6 +46,13 @@ class AwsIntelArgumentParser(argparse.ArgumentParser):
     utility_parsers: dict[str, argparse.ArgumentParser]
 
 
+class UtilityHelpFormatter(argparse.HelpFormatter):
+    """Keep utility names and their descriptions on the same line."""
+
+    def __init__(self, prog: str) -> None:
+        super().__init__(prog, max_help_position=30)
+
+
 def _security_group_tree_depth(value: str) -> int:
     """Parse a safe security group traversal depth."""
     try:
@@ -139,6 +146,7 @@ def create_parser() -> AwsIntelArgumentParser:
         prog="awsi",
         usage="%(prog)s <utility> <options>",
         description="Retrieve useful information from AWS.",
+        formatter_class=UtilityHelpFormatter,
     )
     parser.add_argument(
         "--version",
@@ -153,6 +161,7 @@ def create_parser() -> AwsIntelArgumentParser:
     security_group_tree = utilities.add_parser(
         "security-group-tree",
         prog="awsi security-group-tree",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         help=(
             "Show attached resources, recursively connected security groups, "
             "and network ranges."
@@ -161,6 +170,13 @@ def create_parser() -> AwsIntelArgumentParser:
             "Show attached resources and inbound and outbound security group "
             "connections. "
             "Uses the active AWS CLI credentials and region."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  awsi security-group-tree sg-0123456789abcdef0\n"
+            "  awsi security-group-tree sg-0123456789abcdef0 --depth 2\n"
+            "  awsi security-group-tree sg-0123456789abcdef0 --inbound\n"
+            "  awsi security-group-tree sg-0123456789abcdef0 --filter database"
         ),
     )
     security_group_tree.add_argument(
