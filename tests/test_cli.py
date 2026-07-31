@@ -1,6 +1,9 @@
 """Tests for the command-line entry point."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from ipaddress import IPv4Network
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +12,8 @@ from aws_intel.security_groups.model import (
     SecurityGroupConnection,
 )
 from aws_intel.cli import main
+from aws_intel.forwarding.config import ForwardConfig
+from aws_intel.forwarding.model import ActiveForward, BastionHost, PortMapping
 
 
 def test_help_exits_successfully(capsys: pytest.CaptureFixture[str]) -> None:
@@ -54,6 +59,32 @@ def test_help_utility_rejects_unknown_utility(
 
     assert exit_info.value.code == 2
     assert "invalid choice: 'unknown'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("arguments", "example"),
+    [
+        (["forward", "--help"], "awsi forward start apigateway-dev"),
+        (["forward", "start", "--help"], "awsi forward start apigateway-dev"),
+        (["forward", "save", "--help"], "awsi forward save apigateway-dev"),
+        (["forward", "active", "--help"], "awsi forward active"),
+        (["forward", "stop", "--help"], "awsi forward stop apigateway-dev"),
+        (["forward", "hosts", "--help"], "awsi forward hosts"),
+        (["forward", "configs", "--help"], "awsi forward configs"),
+    ],
+)
+def test_forward_help_includes_examples(
+    arguments: list[str],
+    example: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(arguments)
+
+    assert exit_info.value.code == 0
+    output = capsys.readouterr().out
+    assert "Example" in output
+    assert example in output
 
 
 def test_version_exits_successfully(capsys: pytest.CaptureFixture[str]) -> None:
@@ -320,3 +351,472 @@ def test_each_security_group_id_is_validated_before_aws_request(
 
     assert exit_info.value.code == 2
     assert "'not-a-security-group' must be" in capsys.readouterr().err
+
+
+class FakeForwardingGateway:
+    starts: list[tuple[str, str, PortMapping]] = []
+
+    def list_hosts(self) -> tuple[BastionHost, ...]:
+        return (
+            BastionHost("i-0123456789abcdef0", "public-bastion"),
+            BastionHost("i-11111111"),
+        )
+
+    def start(
+        self, instance_id: str, host: str, port_mapping: PortMapping
+    ) -> int:
+        self.starts.append((instance_id, host, port_mapping))
+        return 4321
+
+    def resolve_instance_name(self, name: str) -> str:
+        assert name == "public-bastion"
+        return "i-0123456789abcdef0"
+
+
+class FakeForwardRegistry:
+    added: list[object] = []
+    active: tuple[object, ...] = ()
+
+    def add(self, forward: object) -> None:
+        self.added.append(forward)
+
+    def list_active(self) -> tuple[object, ...]:
+        return self.active
+
+    def terminate(self, reference: str) -> ActiveForward:
+        for forward in self.active:
+            if isinstance(forward, ActiveForward) and (
+                forward.name == reference or str(forward.pid) == reference
+            ):
+                return forward
+        raise AssertionError(f"unexpected forward reference: {reference}")
+
+
+@pytest.fixture(autouse=True)
+def fake_forward_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeForwardRegistry.added = []
+    FakeForwardRegistry.active = ()
+    monkeypatch.setattr("aws_intel.cli.ForwardRegistry", FakeForwardRegistry)
+
+
+def test_forward_starts_requested_port_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    FakeForwardingGateway.starts = []
+    monkeypatch.setattr(
+        "aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway
+    )
+
+    result = main(
+        [
+            "forward",
+            "start",
+            "primary-database",
+            "--instance-id=i-0123456789abcdef0",
+            "--host=db.internal",
+            "--port=15432:5432",
+        ]
+    )
+
+    assert result == 0
+    assert FakeForwardingGateway.starts == [
+        (
+            "i-0123456789abcdef0",
+            "db.internal",
+            PortMapping(local_port=15432, remote_port=5432),
+        )
+    ]
+    assert FakeForwardRegistry.added == [
+        ActiveForward(
+            4321,
+            "i-0123456789abcdef0",
+            "db.internal",
+            PortMapping(local_port=15432, remote_port=5432),
+            "primary-database",
+        )
+    ]
+    assert capsys.readouterr().out == (
+        "Forward 'primary-database' started in the background with PID 4321.\n"
+    )
+
+
+def test_forward_save_writes_configuration_without_starting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / ".awsi" / "forwards.yaml"
+    FakeForwardingGateway.starts = []
+    monkeypatch.setattr(
+        "aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway
+    )
+    monkeypatch.setattr("aws_intel.cli.ForwardConfig", lambda: ForwardConfig(path))
+
+    result = main(
+        [
+            "forward",
+            "save",
+            "apigateway-dev",
+            "--instance-name=solo-connect-bastion-dev",
+            "--host=api.internal",
+            "--port=9072:9072",
+        ]
+    )
+
+    assert result == 0
+    assert FakeForwardingGateway.starts == []
+    assert "instance-name: solo-connect-bastion-dev" in path.read_text(
+        encoding="utf-8"
+    )
+    assert capsys.readouterr().out == (
+        f"Forward 'apigateway-dev' saved to {path}.\n"
+    )
+
+
+def test_forward_starts_named_configuration_from_current_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_directory = tmp_path / ".awsi"
+    config_directory.mkdir()
+    (config_directory / "forwards.yaml").write_text(
+        "forwards:\n"
+        "  apigateway:\n"
+        "    instance-id: i-0123456789abcdef0\n"
+        "    host: api.internal\n"
+        "    port: 9072:443\n",
+        encoding="utf-8",
+    )
+    FakeForwardingGateway.starts = []
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway
+    )
+
+    result = main(["forward", "start", "apigateway"])
+
+    assert result == 0
+    assert FakeForwardingGateway.starts == [
+        (
+            "i-0123456789abcdef0",
+            "api.internal",
+            PortMapping(9072, 443),
+        )
+    ]
+    assert FakeForwardRegistry.added == [
+        ActiveForward(
+            4321,
+            "i-0123456789abcdef0",
+            "api.internal",
+            PortMapping(9072, 443),
+            "apigateway",
+        )
+    ]
+    assert capsys.readouterr().out == (
+        "Forward 'apigateway' started in the background with PID 4321.\n"
+    )
+
+
+def test_forward_reports_unknown_saved_configuration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["forward", "missing"]) == 1
+    assert "no forward named 'missing'" in capsys.readouterr().err
+
+
+def test_forward_configs_lists_saved_definitions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_directory = tmp_path / ".awsi"
+    config_directory.mkdir()
+    (config_directory / "forwards.yaml").write_text(
+        "forwards:\n"
+        "  apigateway:\n"
+        "    instance-name: bastion\n"
+        "    host: api.internal\n"
+        "    port: 9072:443\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["forward", "configs"]) == 0
+    assert capsys.readouterr().out == (
+        "NAME\tINSTANCE\tHOST\tPORT\n"
+        "apigateway\tbastion\tapi.internal\t9072:443\n"
+    )
+
+
+def test_forward_lists_active_background_sessions(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    FakeForwardRegistry.active = (
+        ActiveForward(
+            4321,
+            "i-0123456789abcdef0",
+            "db.internal",
+            PortMapping(15432, 5432),
+            "primary-database",
+        ),
+    )
+
+    result = main(["forward", "active"])
+
+    assert result == 0
+    assert capsys.readouterr().out == (
+        "PID\tNAME\tINSTANCE_ID\tHOST\tPORT\n"
+        "4321\tprimary-database\ti-0123456789abcdef0\tdb.internal\t"
+        "15432:5432\n"
+    )
+
+
+def test_forward_list_prints_column_names_when_empty(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["forward", "--list"]) == 0
+    assert capsys.readouterr().out == "PID\tNAME\tINSTANCE_ID\tHOST\tPORT\n"
+
+
+def test_forward_kills_background_session_by_name(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    FakeForwardRegistry.active = (
+        ActiveForward(
+            4321,
+            "i-0123456789abcdef0",
+            "db.internal",
+            PortMapping(15432, 5432),
+            "primary-database",
+        ),
+    )
+
+    result = main(["forward", "stop", "primary-database"])
+
+    assert result == 0
+    assert capsys.readouterr().out == (
+        "Forward 'primary-database' with PID 4321 was terminated.\n"
+    )
+
+
+def test_forward_resolves_name_with_loading_indicator_before_starting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class TrackingGateway(FakeForwardingGateway):
+        def resolve_instance_name(self, name: str) -> str:
+            events.append(f"resolve:{name}")
+            return "i-0123456789abcdef0"
+
+        def start(
+            self, instance_id: str, host: str, port_mapping: PortMapping
+        ) -> int:
+            events.append(f"start:{instance_id}")
+            return 0
+
+    @contextmanager
+    def tracking_spinner(message: str) -> Iterator[None]:
+        events.append(f"spinner:{message}")
+        yield
+        events.append("spinner:stop")
+
+    monkeypatch.setattr(
+        "aws_intel.cli.AwsCliForwardingGateway", TrackingGateway
+    )
+    monkeypatch.setattr("aws_intel.cli.spinner", tracking_spinner)
+
+    result = main(
+        [
+            "forward",
+            "start",
+            "--instance-name=public-bastion",
+            "--host=db.internal",
+            "--port=15432:5432",
+        ]
+    )
+
+    assert result == 0
+    assert events == [
+        "spinner:Resolving bastion instance...",
+        "resolve:public-bastion",
+        "spinner:stop",
+        "start:i-0123456789abcdef0",
+    ]
+
+
+def test_forward_hosts_lists_ids_and_optional_names(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway
+    )
+
+    result = main(["forward", "hosts"])
+
+    assert result == 0
+    assert capsys.readouterr().out == (
+        "i-0123456789abcdef0\tpublic-bastion\ni-11111111\n"
+    )
+
+
+def test_forward_hosts_shows_loading_indicator_while_fetching(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class TrackingGateway(FakeForwardingGateway):
+        def list_hosts(self) -> tuple[BastionHost, ...]:
+            events.append("fetch")
+            return ()
+
+    @contextmanager
+    def tracking_spinner(message: str) -> Iterator[None]:
+        events.append(f"start:{message}")
+        yield
+        events.append("stop")
+
+    monkeypatch.setattr(
+        "aws_intel.cli.AwsCliForwardingGateway", TrackingGateway
+    )
+    monkeypatch.setattr("aws_intel.cli.spinner", tracking_spinner)
+
+    result = main(["forward", "hosts"])
+
+    assert result == 0
+    assert events == [
+        "start:Loading potential bastion hosts...",
+        "fetch",
+        "stop",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (
+            ["forward"],
+            "required: <action>",
+        ),
+        (
+            ["forward", "--instance-id=i-01234567", "--port=1:2"],
+            "requires --host",
+        ),
+        (
+            ["forward", "--instance-id=i-01234567", "--host=x"],
+            "requires --port",
+        ),
+        (
+            [
+                "forward",
+                "--instance-id=i-01234567",
+                "--host=x",
+                "--port=1:2",
+                "--save",
+            ],
+            "required: NAME",
+        ),
+        (
+            [
+                "forward",
+                "--instance-id=i-01234567",
+                "--host=x",
+                "--port=0:443",
+            ],
+            "ports must be between 1 and 65535",
+        ),
+        (
+            [
+                "forward",
+                "--instance-id=i-01234567",
+                "--host=x",
+                "--port=local:443",
+            ],
+            "ports must be integers",
+        ),
+        (
+            [
+                "forward",
+                "--instance-id=i-01234567",
+                "--host=x",
+                "--port=443",
+            ],
+            "must be LOCAL_PORT:REMOTE_PORT",
+        ),
+        (
+            ["forward", "--instance-id=i-01234567", "--list-hosts"],
+            "unrecognized arguments",
+        ),
+        (
+            ["forward", "--instance-id=i-01234567", "--list"],
+            "unrecognized arguments",
+        ),
+        (
+            ["forward", "--instance-id=i-01234567", "--kill", "4321"],
+            "unrecognized arguments",
+        ),
+        (
+            [
+                "forward",
+                "--instance-id=not-an-instance",
+                "--host=x",
+                "--port=1:2",
+            ],
+            "must be an EC2 instance ID",
+        ),
+    ],
+)
+def test_forward_rejects_invalid_arguments(
+    arguments: list[str],
+    message: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(arguments)
+
+    assert exit_info.value.code == 2
+    assert message in capsys.readouterr().err
+
+
+def test_forward_host_selectors_are_mutually_exclusive(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(
+            [
+                "forward",
+                "--instance-id=i-01234567",
+                "--instance-name=bastion",
+                "--host=x",
+                "--port=1:2",
+            ]
+        )
+
+    assert exit_info.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
+
+
+def test_forward_start_rejects_removed_name_option(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(
+            [
+                "forward",
+                "start",
+                "--instance-id=i-01234567",
+                "--host=x",
+                "--port=1:2",
+                "--name=legacy-name",
+            ]
+        )
+
+    assert exit_info.value.code == 2
+    assert "unrecognized arguments: --name=legacy-name" in capsys.readouterr().err

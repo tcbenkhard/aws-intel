@@ -39,6 +39,7 @@ credential assumptions visible to the user.
 - Provide useful `--help` text and actionable error messages.
 - Validate arguments before making AWS requests.
 - Keep command output stable and suitable for scripting.
+- Always include column names when command output presents tabular information.
 - Send requested data to standard output and diagnostics to standard error.
 - Use meaningful exit codes and return a non-zero code on failure.
 - Support non-interactive use; do not prompt unless the command clearly opts

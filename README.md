@@ -35,6 +35,7 @@ one utility:
 ```shell
 awsi help
 awsi help security-group-tree
+awsi help forward
 ```
 
 For example:
@@ -77,6 +78,116 @@ and the number of referenced groups can grow rapidly at each level.
 Interactive terminals show a loading indicator while AWS resources are being
 retrieved. The indicator is written to standard error and is disabled when
 output is redirected or piped.
+
+Start an SSM port forwarding session through an online, SSM-managed EC2
+instance to a host reachable from that instance:
+
+```shell
+awsi forward start primary-database \
+  --instance-id=i-0123456789abcdef0 \
+  --host=db.internal --port=5432:5432
+```
+
+The bastion can also be selected by its exact EC2 `Name` tag, which remains
+stable when an instance is replaced:
+
+```shell
+awsi forward start database --instance-name=public-bastion \
+  --host=db.internal --port=5432:5432
+```
+
+Only active (`pending` or `running`) instances are considered. The command
+fails rather than choosing arbitrarily if multiple active instances have the
+same `Name` tag. `--instance-id` and `--instance-name` are mutually exclusive.
+
+The first port is the local listening port and the second is the remote host's
+port. The command uses the
+`AWS-StartPortForwardingSessionToRemoteHost` document and starts the session in
+the background, then prints a confirmation containing the process ID. The AWS
+CLI and its Session Manager plugin must be installed.
+
+Save a named forward without resolving the instance or starting a session:
+
+```shell
+awsi forward save apigateway-dev \
+  --instance-name=solo-connect-bastion-dev \
+  --host=internal-apigw-internal-dev-2025348469.eu-west-1.elb.amazonaws.com \
+  --port=9072:9072
+```
+
+The `save` action adds or replaces that name in `.awsi/forwards.yaml` under
+the current working directory without resolving the instance or starting a
+session. The generated configuration looks like this:
+
+```yaml
+forwards:
+  apigateway-dev:
+    instance-name: solo-connect-bastion-dev
+    host: internal-apigw-internal-dev-2025348469.eu-west-1.elb.amazonaws.com
+    port: 9072:9072
+```
+
+Start a saved forward by its configuration name:
+
+```shell
+awsi forward start apigateway-dev
+```
+
+The command reads `.awsi/forwards.yaml` from the current working directory,
+resolves the configured instance when necessary, and starts the forward using
+the saved host and port mapping.
+
+List all saved definitions with:
+
+```shell
+awsi forward configs
+```
+
+List forwards started by `awsi` that still have a running process with:
+
+```shell
+awsi forward active
+```
+
+The output has a tab-separated header and columns for process ID, optional name
+(`-` when unnamed), bastion instance ID, remote host, and the port mapping.
+Completed forwards are removed from the list:
+
+```text
+PID	NAME	INSTANCE_ID	HOST	PORT
+4321	primary-database	i-0123456789abcdef0	db.internal	5432:5432
+```
+
+End an active forward by its exact name:
+
+```shell
+awsi forward stop primary-database
+```
+
+If no forward has that name, the reference is interpreted as a process ID:
+
+```shell
+awsi forward stop 40234
+```
+
+Only forwards tracked by `awsi` can be terminated. When multiple active
+forwards share a name, use the process ID shown by `--list`.
+List online SSM-managed EC2 instances in the active account and region with:
+
+```shell
+awsi forward hosts
+```
+
+The list is tab-separated: instance ID followed by the EC2 `Name` tag when one
+is present. Listing requires `ssm:DescribeInstanceInformation` and
+`ec2:DescribeInstances`; starting a session requires the corresponding
+`ssm:StartSession` and session-channel permissions.
+
+`awsi forward NAME`, `awsi forward list`, `awsi forward --list`,
+`awsi forward --kill`, and `awsi forward --list-hosts` remain available as
+compatibility aliases, but the action-based forms above are the recommended
+interface. Forward names are positional; the former `--name` option is no
+longer supported.
 
 Supply multiple security group IDs to combine them as sibling roots in one
 tree:
