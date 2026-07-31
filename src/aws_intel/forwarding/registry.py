@@ -52,7 +52,29 @@ class ForwardRegistry:
     def terminate(self, reference: str) -> ActiveForward:
         """Terminate one active forward, resolving names before process IDs."""
         forwards = list(self.list_active())
-        named = [forward for forward in forwards if forward.name == reference]
+        selected = self.resolve(reference, tuple(forwards))
+        try:
+            os.killpg(selected.pid, signal.SIGTERM)
+        except ProcessLookupError as error:
+            self._write([forward for forward in forwards if forward != selected])
+            raise ForwardNotFoundError(
+                f"forward {reference!r} is no longer running"
+            ) from error
+        except PermissionError as error:
+            raise ForwardRegistryError(
+                f"permission denied while terminating forward {reference!r}"
+            ) from error
+        self._write([forward for forward in forwards if forward != selected])
+        return selected
+
+    def resolve(
+        self,
+        reference: str,
+        forwards: tuple[ActiveForward, ...] | None = None,
+    ) -> ActiveForward:
+        """Resolve an active forward by name or PID without changing it."""
+        active = forwards if forwards is not None else self.list_active()
+        named = [forward for forward in active if forward.name == reference]
         if len(named) > 1:
             raise ForwardRegistryError(
                 f"multiple active forwards are named {reference!r}; use a PID"
@@ -66,27 +88,9 @@ class ForwardRegistry:
                 raise ForwardNotFoundError(
                     f"no active forward matches {reference!r}"
                 ) from error
-            selected = next(
-                (forward for forward in forwards if forward.pid == pid), None
-            )
+            selected = next((forward for forward in active if forward.pid == pid), None)
             if selected is None:
-                raise ForwardNotFoundError(
-                    f"no active forward matches {reference!r}"
-                )
-        try:
-            os.killpg(selected.pid, signal.SIGTERM)
-        except ProcessLookupError as error:
-            self._write(
-                [forward for forward in forwards if forward != selected]
-            )
-            raise ForwardNotFoundError(
-                f"forward {reference!r} is no longer running"
-            ) from error
-        except PermissionError as error:
-            raise ForwardRegistryError(
-                f"permission denied while terminating forward {reference!r}"
-            ) from error
-        self._write([forward for forward in forwards if forward != selected])
+                raise ForwardNotFoundError(f"no active forward matches {reference!r}")
         return selected
 
     @staticmethod

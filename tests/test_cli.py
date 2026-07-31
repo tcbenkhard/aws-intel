@@ -66,9 +66,7 @@ def test_help_utility_shows_detailed_utility_help(
 
     assert result == 0
     output = capsys.readouterr().out
-    assert output.startswith(
-        "usage: awsi security-group-tree [-h] [--depth DEPTH]"
-    )
+    assert output.startswith("usage: awsi security-group-tree [-h] [--depth DEPTH]")
     assert "One or more starting security group IDs" in output
     assert "Maximum connection depth to expand" in output
 
@@ -91,6 +89,7 @@ def test_help_utility_rejects_unknown_utility(
         (["forward", "save", "--help"], "awsi forward save apigateway-dev"),
         (["forward", "active", "--help"], "awsi forward active"),
         (["forward", "stop", "--help"], "awsi forward stop apigateway-dev"),
+        (["forward", "restart", "--help"], "awsi forward restart apigateway-dev"),
         (["forward", "hosts", "--help"], "awsi forward hosts"),
         (["forward", "list", "--help"], "awsi forward list"),
     ],
@@ -135,9 +134,7 @@ class FakeGateway:
             inbound_connections=(
                 SecurityGroupConnection("10.0.0.0/8", "tcp", 443, 443),
             ),
-            outbound_connections=(
-                SecurityGroupConnection("0.0.0.0/0", "-1"),
-            ),
+            outbound_connections=(SecurityGroupConnection("0.0.0.0/0", "-1"),),
         )
 
 
@@ -186,9 +183,7 @@ def test_security_group_tree_can_show_only_inbound(
         FakeResourceGateway,
     )
 
-    result = main(
-        ["security-group-tree", "sg-0123456789abcdef0", "--inbound"]
-    )
+    result = main(["security-group-tree", "sg-0123456789abcdef0", "--inbound"])
 
     assert result == 0
     output = capsys.readouterr().out
@@ -384,9 +379,7 @@ class FakeForwardingGateway:
             BastionHost("i-11111111"),
         )
 
-    def start(
-        self, instance_id: str, host: str, port_mapping: PortMapping
-    ) -> int:
+    def start(self, instance_id: str, host: str, port_mapping: PortMapping) -> int:
         self.starts.append((instance_id, host, port_mapping))
         return 4321
 
@@ -419,6 +412,11 @@ class FakeForwardRegistry:
                 )
 
     def terminate(self, reference: str) -> ActiveForward:
+        forward = self.resolve(reference)
+        type(self).active = tuple(item for item in self.active if item != forward)
+        return forward
+
+    def resolve(self, reference: str) -> ActiveForward:
         for forward in self.active:
             if isinstance(forward, ActiveForward) and (
                 forward.name == reference or str(forward.pid) == reference
@@ -439,9 +437,7 @@ def test_forward_starts_requested_port_mapping(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     FakeForwardingGateway.starts = []
-    monkeypatch.setattr(
-        "aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway
-    )
+    monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway)
 
     result = main(
         [
@@ -490,9 +486,7 @@ def test_forward_rejects_an_identical_active_forward(
             "primary-database",
         ),
     )
-    monkeypatch.setattr(
-        "aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway
-    )
+    monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway)
 
     result = main(
         [
@@ -517,9 +511,7 @@ def test_forward_save_writes_configuration_without_starting(
 ) -> None:
     path = tmp_path / ".awsi" / "forwards.yaml"
     FakeForwardingGateway.starts = []
-    monkeypatch.setattr(
-        "aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway
-    )
+    monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway)
     monkeypatch.setattr("aws_intel.cli.ForwardConfig", lambda: ForwardConfig(path))
 
     result = main(
@@ -535,12 +527,8 @@ def test_forward_save_writes_configuration_without_starting(
 
     assert result == 0
     assert FakeForwardingGateway.starts == []
-    assert "instance-name: solo-connect-bastion-dev" in path.read_text(
-        encoding="utf-8"
-    )
-    assert capsys.readouterr().out == (
-        f"Forward 'apigateway-dev' saved to {path}.\n"
-    )
+    assert "instance-name: solo-connect-bastion-dev" in path.read_text(encoding="utf-8")
+    assert capsys.readouterr().out == (f"Forward 'apigateway-dev' saved to {path}.\n")
 
 
 def test_forward_starts_named_configuration_from_current_directory(
@@ -560,9 +548,7 @@ def test_forward_starts_named_configuration_from_current_directory(
     )
     FakeForwardingGateway.starts = []
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(
-        "aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway
-    )
+    monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway)
 
     result = main(["forward", "start", "apigateway"])
 
@@ -620,8 +606,7 @@ def test_forward_list_lists_saved_definitions(
 
     assert main(["forward", action]) == 0
     assert capsys.readouterr().out == (
-        "NAME\tINSTANCE\tHOST\tPORT\n"
-        "apigateway\tbastion\tapi.internal\t9072:443\n"
+        "NAME\tINSTANCE\tHOST\tPORT\napigateway\tbastion\tapi.internal\t9072:443\n"
     )
 
 
@@ -676,6 +661,68 @@ def test_forward_kills_background_session_by_name(
     )
 
 
+def test_forward_stop_all_terminates_every_active_session(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    FakeForwardRegistry.active = (
+        ActiveForward(101, "i-11111111", "db.internal", PortMapping(1, 2), "db"),
+        ActiveForward(202, "i-22222222", "api.internal", PortMapping(3, 4)),
+    )
+
+    assert main(["forward", "stop", "--all"]) == 0
+    assert FakeForwardRegistry.active == ()
+    assert capsys.readouterr().out == (
+        "Forward 'db' with PID 101 was terminated.\n"
+        "Forward with PID 202 was terminated.\n"
+    )
+
+
+def test_forward_restart_relaunches_active_session(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    original = ActiveForward(
+        101, "i-11111111", "db.internal", PortMapping(15432, 5432), "database"
+    )
+    FakeForwardRegistry.active = (original,)
+    FakeForwardingGateway.starts = []
+    monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway)
+
+    assert main(["forward", "restart", "database"]) == 0
+    assert FakeForwardingGateway.starts == [
+        ("i-11111111", "db.internal", PortMapping(15432, 5432))
+    ]
+    assert FakeForwardRegistry.added == [
+        ActiveForward(
+            4321,
+            "i-11111111",
+            "db.internal",
+            PortMapping(15432, 5432),
+            "database",
+        )
+    ]
+    assert capsys.readouterr().out == (
+        "Forward 'database' restarted in the background with PID 4321.\n"
+    )
+
+
+def test_forward_restart_all_relaunches_every_active_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    FakeForwardRegistry.active = (
+        ActiveForward(101, "i-11111111", "db.internal", PortMapping(1, 2), "db"),
+        ActiveForward(202, "i-22222222", "api.internal", PortMapping(3, 4)),
+    )
+    FakeForwardingGateway.starts = []
+    monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway)
+
+    assert main(["forward", "restart", "--all"]) == 0
+    assert FakeForwardingGateway.starts == [
+        ("i-11111111", "db.internal", PortMapping(1, 2)),
+        ("i-22222222", "api.internal", PortMapping(3, 4)),
+    ]
+
+
 def test_forward_resolves_name_with_loading_indicator_before_starting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -686,9 +733,7 @@ def test_forward_resolves_name_with_loading_indicator_before_starting(
             events.append(f"resolve:{name}")
             return "i-0123456789abcdef0"
 
-        def start(
-            self, instance_id: str, host: str, port_mapping: PortMapping
-        ) -> int:
+        def start(self, instance_id: str, host: str, port_mapping: PortMapping) -> int:
             events.append(f"start:{instance_id}")
             return 0
 
@@ -698,9 +743,7 @@ def test_forward_resolves_name_with_loading_indicator_before_starting(
         yield
         events.append("spinner:stop")
 
-    monkeypatch.setattr(
-        "aws_intel.cli.AwsCliForwardingGateway", TrackingGateway
-    )
+    monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", TrackingGateway)
     monkeypatch.setattr("aws_intel.cli.spinner", tracking_spinner)
 
     result = main(
@@ -726,9 +769,7 @@ def test_forward_hosts_lists_ids_and_optional_names(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(
-        "aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway
-    )
+    monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway)
 
     result = main(["forward", "hosts"])
 
@@ -754,9 +795,7 @@ def test_forward_hosts_shows_loading_indicator_while_fetching(
         yield
         events.append("stop")
 
-    monkeypatch.setattr(
-        "aws_intel.cli.AwsCliForwardingGateway", TrackingGateway
-    )
+    monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", TrackingGateway)
     monkeypatch.setattr("aws_intel.cli.spinner", tracking_spinner)
 
     result = main(["forward", "hosts"])

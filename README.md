@@ -179,6 +179,20 @@ If no forward has that name, the reference is interpreted as a process ID:
 awsi forward stop 40234
 ```
 
+Stop every active forward with:
+
+```console
+awsi forward stop --all
+```
+
+Restart an active forward by name or PID, preserving its current connection
+details, or restart every active forward:
+
+```console
+awsi forward restart primary-database
+awsi forward restart --all
+```
+
 Only forwards tracked by `awsi` can be terminated. When multiple active
 forwards share a name, use the process ID shown by `--list`.
 List online SSM-managed EC2 instances in the active account and region with:

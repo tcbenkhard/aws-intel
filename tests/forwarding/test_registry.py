@@ -112,9 +112,7 @@ def test_terminates_forward_by_name_or_pid(
     named = ActiveForward(
         101, "i-11111111", "db.internal", PortMapping(1, 2), "database"
     )
-    unnamed = ActiveForward(
-        202, "i-22222222", "api.internal", PortMapping(3, 4)
-    )
+    unnamed = ActiveForward(202, "i-22222222", "api.internal", PortMapping(3, 4))
     registry.add(named)
     registry.add(unnamed)
     signals: list[tuple[int, signal.Signals]] = []
@@ -140,9 +138,7 @@ def test_name_match_takes_precedence_over_numeric_pid(
     registry.add(
         ActiveForward(101, "i-11111111", "db.internal", PortMapping(1, 2), "202")
     )
-    registry.add(
-        ActiveForward(202, "i-22222222", "api.internal", PortMapping(3, 4))
-    )
+    registry.add(ActiveForward(202, "i-22222222", "api.internal", PortMapping(3, 4)))
     monkeypatch.setattr(
         "aws_intel.forwarding.registry.os.kill", lambda pid, value: None
     )
@@ -155,6 +151,22 @@ def test_name_match_takes_precedence_over_numeric_pid(
     registry.terminate("202")
 
     assert terminated == [101]
+
+
+def test_resolves_forward_without_terminating_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry = ForwardRegistry(tmp_path / "forwards.json")
+    forward = ActiveForward(
+        101, "i-11111111", "db.internal", PortMapping(1, 2), "database"
+    )
+    registry.add(forward)
+    monkeypatch.setattr(
+        "aws_intel.forwarding.registry.os.kill", lambda pid, value: None
+    )
+
+    assert registry.resolve("database") == forward
+    assert registry.list_active() == (forward,)
 
 
 def test_rejects_ambiguous_or_unknown_forward_references(

@@ -33,6 +33,7 @@ FORWARD_ACTIONS = {
     "save",
     "active",
     "stop",
+    "restart",
     "hosts",
     "list",
     "configs",
@@ -218,6 +219,7 @@ def create_parser() -> AwsIntelArgumentParser:
             "--host=api.internal --port=9072:9072\n"
             "  awsi forward active\n"
             "  awsi forward stop apigateway-dev\n"
+            "  awsi forward restart apigateway-dev\n"
             "  awsi forward hosts\n"
             "  awsi forward list"
         ),
@@ -271,14 +273,35 @@ def create_parser() -> AwsIntelArgumentParser:
     forward_stop = forward_actions.add_parser(
         "stop",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="Stop an active forward by name or PID.",
+        help="Stop one or all active forwards.",
         epilog=(
             "Examples:\n"
             "  awsi forward stop apigateway-dev\n"
-            "  awsi forward stop 40234"
+            "  awsi forward stop 40234\n"
+            "  awsi forward stop --all"
         ),
     )
-    forward_stop.add_argument("reference", metavar="NAME_OR_PID")
+    stop_target = forward_stop.add_mutually_exclusive_group(required=True)
+    stop_target.add_argument("reference", nargs="?", metavar="NAME_OR_PID")
+    stop_target.add_argument(
+        "--all", action="store_true", help="Stop every active forward."
+    )
+    forward_restart = forward_actions.add_parser(
+        "restart",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="Restart one or all active forwards.",
+        epilog=(
+            "Examples:\n"
+            "  awsi forward restart apigateway-dev\n"
+            "  awsi forward restart 40234\n"
+            "  awsi forward restart --all"
+        ),
+    )
+    restart_target = forward_restart.add_mutually_exclusive_group(required=True)
+    restart_target.add_argument("reference", nargs="?", metavar="NAME_OR_PID")
+    restart_target.add_argument(
+        "--all", action="store_true", help="Restart every active forward."
+    )
     forward_actions.add_parser(
         "hosts",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -357,9 +380,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                         tuple(
                             filtered
                             for tree in trees
-                            if (
-                                filtered := filter_tree(tree, parsed.filter)
-                            )
+                            if (filtered := filter_tree(tree, parsed.filter))
                             is not None
                         )
                         if parsed.filter is not None
@@ -367,9 +388,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     )
                     if len(trees) == 1:
                         rendered = (
-                            render_tree(filtered_trees[0])
-                            if filtered_trees
-                            else ""
+                            render_tree(filtered_trees[0]) if filtered_trees else ""
                         )
                     else:
                         rendered = render_tree(
@@ -407,14 +426,51 @@ def main(arguments: Sequence[str] | None = None) -> int:
                     f"{forward.port_mapping.remote_port}"
                 )
             return 0
-        if parsed.forward_action == "stop":
+        if parsed.forward_action in {"stop", "restart"}:
+            restarted: list[ActiveForward] = []
             try:
-                stopped = ForwardRegistry().terminate(parsed.reference)
-            except ForwardRegistryError as error:
+                registry = ForwardRegistry()
+                if not parsed.all:
+                    assert parsed.reference is not None
+                targets = (
+                    registry.list_active()
+                    if parsed.all
+                    else (registry.resolve(parsed.reference),)
+                )
+                stopped = tuple(
+                    registry.terminate(str(forward.pid)) for forward in targets
+                )
+                if parsed.forward_action == "restart":
+                    gateway = AwsCliForwardingGateway()
+                    for forward in stopped:
+                        pid = gateway.start(
+                            forward.instance_id,
+                            forward.host,
+                            forward.port_mapping,
+                        )
+                        replacement = ActiveForward(
+                            pid,
+                            forward.instance_id,
+                            forward.host,
+                            forward.port_mapping,
+                            forward.name,
+                        )
+                        registry.add(replacement)
+                        restarted.append(replacement)
+            except (ForwardingError, ForwardRegistryError) as error:
                 print(f"awsi: error: {error}", file=sys.stderr)
                 return 1
-            label = f" {stopped.name!r}" if stopped.name is not None else ""
-            print(f"Forward{label} with PID {stopped.pid} was terminated.")
+            if parsed.forward_action == "restart":
+                for forward in restarted:
+                    label = f" {forward.name!r}" if forward.name is not None else ""
+                    print(
+                        f"Forward{label} restarted in the background with PID "
+                        f"{forward.pid}."
+                    )
+            else:
+                for forward in stopped:
+                    label = f" {forward.name!r}" if forward.name is not None else ""
+                    print(f"Forward{label} with PID {forward.pid} was terminated.")
             return 0
         if parsed.forward_action == "hosts":
             try:
@@ -523,22 +579,16 @@ def main(arguments: Sequence[str] | None = None) -> int:
             instance_id = parsed.instance_id
             if parsed.instance_name is not None:
                 with spinner("Resolving bastion instance..."):
-                    instance_id = gateway.resolve_instance_name(
-                        parsed.instance_name
-                    )
+                    instance_id = gateway.resolve_instance_name(parsed.instance_name)
             assert instance_id is not None
             registry = ForwardRegistry()
             registry.ensure_startable(instance_id, parsed.host, parsed.port)
             pid = gateway.start(instance_id, parsed.host, parsed.port)
             registry.add(
-                ActiveForward(
-                    pid, instance_id, parsed.host, parsed.port, forward_name
-                )
+                ActiveForward(pid, instance_id, parsed.host, parsed.port, forward_name)
             )
             label = f" {forward_name!r}" if forward_name is not None else ""
-            print(
-                f"Forward{label} started in the background with PID {pid}."
-            )
+            print(f"Forward{label} started in the background with PID {pid}.")
             return 0
         except (ForwardingError, ForwardRegistryError) as error:
             print(f"awsi: error: {error}", file=sys.stderr)
