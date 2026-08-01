@@ -18,6 +18,8 @@ jobs:
       matrix:
         python-version:
           - "3.10"
+          - "3.11"
+          - "3.12"
           - "3.14"
 
     steps:
@@ -79,4 +81,3 @@ jobs:
           name: python-distributions
           path: dist/
           if-no-files-found: error
-
