@@ -41,7 +41,113 @@ one utility:
 awsi help
 awsi help security-group-tree
 awsi help forward
+awsi help login
+awsi help console
+awsi help shell-init
 ```
+
+Open a shell authenticated to an account defined in `.awsi/accounts.yaml`:
+
+```shell
+awsi login example-development
+aws sts get-caller-identity
+exit
+```
+
+List the accounts available in the current configuration without logging in:
+
+```shell
+awsi login --list
+```
+
+When an account defines a temporary TEAM role, request access through TEAM and
+open an elevated shell after the request becomes active:
+
+```shell
+awsi login example-development --elevated
+```
+
+When run without an account name in an interactive terminal, `awsi login`
+shows the configured accounts and asks which one to use. If the selected
+account defines TEAM elevated access, it also asks which access level to use:
+
+```text
+$ awsi login
+Select an AWS account:
+  1. example-hub
+  2. example-development
+Account [1-2]: 2
+Select access role:
+  1. standard-access (standard access)
+  2. elevated-access (TEAM elevated)
+Access [1-2]: 2
+```
+
+Press Escape, Ctrl+C, or Ctrl+D to cancel either interactive selection.
+
+After authentication, `awsi` reports the exact expiration returned by AWS and
+the time remaining before it opens the authenticated shell. It also prefixes
+the shell prompt with the active account name.
+
+From inside that authenticated shell, open the AWS Management Console with the
+same account and role in the default browser:
+
+```shell
+awsi console
+```
+
+The temporary console sign-in URL is opened directly and is never printed.
+
+If a zsh theme replaces the prompt supplied by `awsi login`, add this line to
+`~/.zshrc` so the account label is applied after the theme loads:
+
+```zsh
+eval "$(awsi shell-init zsh)"
+```
+
+For example, an authenticated prompt will start with:
+
+```text
+[example-development] user@host project %
+```
+
+The normal prompt is unchanged outside an `awsi login` shell.
+
+The root account contains its IAM Identity Center details. An account with a
+`source` first obtains credentials for that source and then assumes its own
+configured role:
+
+```yaml
+version: 1
+
+accounts:
+  example-hub:
+    account_id: "111111111111"
+    role_name: standard-access
+    sso_start_url: https://example.awsapps.com/start
+    sso_region: eu-west-1
+    region: eu-west-1
+
+  example-development:
+    account_id: "222222222222"
+    role_name: standard-access
+    source: example-hub
+    region: eu-central-1
+    elevated_access:
+      provider: team
+      role_name: elevated-access
+```
+
+Normal login continues to use the configured read-only role chain. Elevated
+login uses the TEAM role as a direct IAM Identity Center assignment. If the
+assignment is not active, `awsi` tells the user to request TEAM access and
+retry.
+
+`awsi` supplies a temporary AWS CLI configuration only while completing the
+SSO login, so an existing `~/.aws/config` is not required or modified. The
+authenticated subshell receives temporary credentials through environment
+variables. They disappear when the shell exits; no credentials are written to
+the repository or to `~/.aws/credentials`.
 
 For example:
 

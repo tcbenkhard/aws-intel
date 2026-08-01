@@ -53,10 +53,12 @@ def test_help_utility_lists_all_utilities(
 
     assert result == 0
     output = capsys.readouterr().out
-    assert "security-group-tree  Show attached resources" in output
-    assert "Show attached resources, recursively connected" in output
-    assert "help" in output
-    assert "Show all utilities or detailed help" in output
+    normalized_output = " ".join(output.split())
+    assert "security-group-tree Show attached resources" in normalized_output
+    assert "Show attached resources, recursively connected" in normalized_output
+    assert "help" in normalized_output
+    assert "Show all utilities or detailed help" in normalized_output
+    assert "login" in normalized_output
 
 
 def test_help_utility_shows_detailed_utility_help(
@@ -66,9 +68,10 @@ def test_help_utility_shows_detailed_utility_help(
 
     assert result == 0
     output = capsys.readouterr().out
+    normalized_output = " ".join(output.split())
     assert output.startswith("usage: awsi security-group-tree [-h] [--depth DEPTH]")
-    assert "One or more starting security group IDs" in output
-    assert "Maximum connection depth to expand" in output
+    assert "One or more starting security group IDs" in normalized_output
+    assert "Maximum connection depth to expand" in normalized_output
     assert "Examples:" in output
     assert "awsi security-group-tree sg-0123456789abcdef0 --depth 2" in output
     assert "awsi security-group-tree sg-0123456789abcdef0 --inbound" in output
@@ -118,6 +121,193 @@ def test_version_exits_successfully(capsys: pytest.CaptureFixture[str]) -> None:
 
     assert exit_info.value.code == 0
     assert capsys.readouterr().out.startswith("awsi ")
+
+
+def test_login_resolves_chain_and_opens_shell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_chain = (object(),)
+
+    class FakeAccountConfig:
+        def resolve_chain(self, name: str) -> tuple[object, ...]:
+            assert name == "development"
+            return expected_chain
+
+    class FakeLoginGateway:
+        def open_shell(
+            self, chain: tuple[object, ...], elevated: bool = False
+        ) -> int:
+            assert chain is expected_chain
+            assert elevated is False
+            return 0
+
+    monkeypatch.setattr("aws_intel.cli.AccountConfig", FakeAccountConfig)
+    monkeypatch.setattr("aws_intel.cli.AwsCliLoginGateway", FakeLoginGateway)
+
+    assert main(["login", "development"]) == 0
+
+
+def test_login_without_account_selects_interactively(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_chain = (object(),)
+
+    class FakeAccountConfig:
+        def list_names(self) -> tuple[str, ...]:
+            return ("development", "production")
+
+        def resolve_chain(self, name: str) -> tuple[object, ...]:
+            assert name == "production"
+            return expected_chain
+
+        def elevated_role_name(self, name: str) -> None:
+            assert name == "production"
+            return None
+
+    class FakeLoginGateway:
+        def open_shell(
+            self, chain: tuple[object, ...], elevated: bool = False
+        ) -> int:
+            assert chain is expected_chain
+            assert elevated is False
+            return 0
+
+    monkeypatch.setattr("aws_intel.cli.AccountConfig", FakeAccountConfig)
+    monkeypatch.setattr("aws_intel.cli.AwsCliLoginGateway", FakeLoginGateway)
+    monkeypatch.setattr(
+        "aws_intel.cli.select_account",
+        lambda names, _input, _output: names[1],
+    )
+
+    assert main(["login"]) == 0
+
+
+def test_login_without_account_can_select_team_elevated_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_chain = (object(),)
+
+    class FakeAccountConfig:
+        def list_names(self) -> tuple[str, ...]:
+            return ("development",)
+
+        def elevated_role_name(self, name: str) -> str:
+            assert name == "development"
+            return "elevated-access"
+
+        def resolve_elevated(self, name: str) -> tuple[object, ...]:
+            assert name == "development"
+            return expected_chain
+
+        def resolve_chain(self, name: str) -> tuple[object, ...]:
+            assert name == "development"
+            class StandardAccount:
+                role_name = "standard-access"
+
+            return (StandardAccount(),)
+
+    class FakeLoginGateway:
+        def open_shell(
+            self, chain: tuple[object, ...], elevated: bool = False
+        ) -> int:
+            assert chain is expected_chain
+            assert elevated is True
+            return 0
+
+    monkeypatch.setattr("aws_intel.cli.AccountConfig", FakeAccountConfig)
+    monkeypatch.setattr("aws_intel.cli.AwsCliLoginGateway", FakeLoginGateway)
+    monkeypatch.setattr(
+        "aws_intel.cli.select_account",
+        lambda names, _input, _output: names[0],
+    )
+    monkeypatch.setattr(
+        "aws_intel.cli.select_elevated_access",
+        lambda standard_role, elevated_role, _input, _output: (
+            standard_role == "standard-access"
+            and elevated_role == "elevated-access"
+        ),
+    )
+
+    assert main(["login"]) == 0
+
+
+def test_login_list_prints_configured_accounts_without_logging_in(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class FakeAccountConfig:
+        def list_names(self) -> tuple[str, ...]:
+            return ("development", "production")
+
+    class UnexpectedLoginGateway:
+        def __init__(self) -> None:
+            pytest.fail("login gateway should not be created when listing accounts")
+
+    monkeypatch.setattr("aws_intel.cli.AccountConfig", FakeAccountConfig)
+    monkeypatch.setattr(
+        "aws_intel.cli.AwsCliLoginGateway", UnexpectedLoginGateway
+    )
+
+    assert main(["login", "--list"]) == 0
+    assert capsys.readouterr().out == "ACCOUNT\ndevelopment\nproduction\n"
+
+
+def test_login_list_rejects_an_account(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(["login", "development", "--list"])
+
+    assert exit_info.value.code == 2
+    assert "not allowed with argument account" in capsys.readouterr().err
+
+
+def test_elevated_login_resolves_team_role_and_opens_shell(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_chain = (object(),)
+
+    class FakeAccountConfig:
+        def resolve_elevated(self, name: str) -> tuple[object, ...]:
+            assert name == "development"
+            return expected_chain
+
+    class FakeLoginGateway:
+        def open_shell(
+            self, chain: tuple[object, ...], elevated: bool = False
+        ) -> int:
+            assert chain is expected_chain
+            assert elevated is True
+            return 0
+
+    monkeypatch.setattr("aws_intel.cli.AccountConfig", FakeAccountConfig)
+    monkeypatch.setattr("aws_intel.cli.AwsCliLoginGateway", FakeLoginGateway)
+
+    assert main(["login", "development", "--elevated"]) == 0
+
+
+def test_console_opens_browser_for_current_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    opened_environments: list[object] = []
+
+    class FakeConsoleGateway:
+        def open(self, environment: object) -> None:
+            opened_environments.append(environment)
+
+    monkeypatch.setattr("aws_intel.cli.AwsConsoleGateway", FakeConsoleGateway)
+
+    assert main(["console"]) == 0
+    assert len(opened_environments) == 1
+    assert "Opened the AWS Management Console" in capsys.readouterr().out
+
+
+def test_shell_init_prints_zsh_integration(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["shell-init", "zsh"]) == 0
+    assert "AWSI_ACCOUNT" in capsys.readouterr().out
 
 
 def test_utility_is_required(capsys: pytest.CaptureFixture[str]) -> None:

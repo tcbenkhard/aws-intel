@@ -2,14 +2,23 @@
 
 import argparse
 from collections.abc import Sequence
+import os
 import re
 import sys
 
 from aws_intel import __version__
+from aws_intel.console.gateway import AwsConsoleGateway, ConsoleError
 from aws_intel.forwarding.config import ForwardConfig, ForwardConfigError
 from aws_intel.forwarding.gateway import AwsCliForwardingGateway, ForwardingError
 from aws_intel.forwarding.model import ActiveForward, PortMapping, SavedForward
 from aws_intel.forwarding.registry import ForwardRegistry, ForwardRegistryError
+from aws_intel.login.config import AccountConfig, AccountConfigError
+from aws_intel.login.gateway import AwsCliLoginGateway, LoginError
+from aws_intel.login.selection import (
+    AccountSelectionError,
+    select_account,
+    select_elevated_access,
+)
 from aws_intel.progress import spinner
 from aws_intel.security_groups.gateway import AwsCliError, AwsCliSecurityGroupGateway
 from aws_intel.security_groups.model import Direction
@@ -22,6 +31,7 @@ from aws_intel.security_groups.tree import (
     filter_tree,
     render_tree,
 )
+from aws_intel.shell.init import render_zsh_init
 from aws_intel.version_check import notify_if_update_available
 
 SECURITY_GROUP_ID = re.compile(r"^sg-[0-9a-fA-F]{8,17}$")
@@ -331,6 +341,66 @@ def create_parser() -> AwsIntelArgumentParser:
         help="List saved forwarding configurations.",
         epilog="Example:\n  awsi forward list",
     )
+    login = utilities.add_parser(
+        "login",
+        prog="awsi login",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="Open a shell authenticated to a configured AWS account.",
+        description=(
+            "Log in with AWS IAM Identity Center, assume any configured role "
+            "chain, and open a shell containing the resulting temporary "
+            "credentials. Exit that shell to return to the previous session."
+        ),
+        epilog=(
+            "Examples:\n"
+            "  awsi login --list\n"
+            "  awsi login example-development\n"
+            "  awsi login example-development --elevated"
+        ),
+    )
+    login_target = login.add_mutually_exclusive_group()
+    login_target.add_argument(
+        "account",
+        nargs="?",
+        help="Account name from .awsi/accounts.yaml.",
+    )
+    login_target.add_argument(
+        "--list",
+        action="store_true",
+        help="List configured account names without logging in.",
+    )
+    login.add_argument(
+        "--elevated",
+        action="store_true",
+        help="Use the account's temporary TEAM elevated role.",
+    )
+    utilities.add_parser(
+        "console",
+        prog="awsi console",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="Open the AWS Console for the current awsi login session.",
+        description=(
+            "Open the AWS Management Console in the default browser using "
+            "credentials from the shell created by awsi login."
+        ),
+        epilog="Example:\n  awsi login\n  awsi console",
+    )
+    shell_init = utilities.add_parser(
+        "shell-init",
+        prog="awsi shell-init",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="Print shell integration code for the current shell.",
+        description=(
+            "Print code that labels an authenticated shell with its AWS "
+            "account name. Evaluate it from the shell startup file."
+        ),
+        epilog='Example for ~/.zshrc:\n  eval "$(awsi shell-init zsh)"',
+    )
+    shell_init.add_argument(
+        "shell",
+        choices=("zsh",),
+        help="Shell whose initialization code should be printed.",
+    )
     help_utility = utilities.add_parser(
         "help",
         prog="awsi help",
@@ -426,6 +496,48 @@ def main(arguments: Sequence[str] | None = None) -> int:
             print(f"awsi: error: {error}", file=sys.stderr)
             return 1
         print("\n\n".join(output))
+    if parsed.utility == "login":
+        try:
+            config = AccountConfig()
+            if parsed.list:
+                print("ACCOUNT")
+                for name in config.list_names():
+                    print(name)
+                return 0
+            account = parsed.account
+            standard_chain = None
+            if account is None:
+                account = select_account(config.list_names(), sys.stdin, sys.stderr)
+                if not parsed.elevated:
+                    elevated_role = config.elevated_role_name(account)
+                    if elevated_role is not None:
+                        standard_chain = config.resolve_chain(account)
+                        parsed.elevated = select_elevated_access(
+                            standard_chain[-1].role_name,
+                            elevated_role,
+                            sys.stdin,
+                            sys.stderr,
+                        )
+            chain = (
+                config.resolve_elevated(account)
+                if parsed.elevated
+                else standard_chain or config.resolve_chain(account)
+            )
+            return AwsCliLoginGateway().open_shell(chain, elevated=parsed.elevated)
+        except (AccountConfigError, AccountSelectionError, LoginError) as error:
+            print(f"awsi: error: {error}", file=sys.stderr)
+            return 1
+    if parsed.utility == "console":
+        try:
+            AwsConsoleGateway().open(os.environ)
+        except ConsoleError as error:
+            print(f"awsi: error: {error}", file=sys.stderr)
+            return 1
+        print("Opened the AWS Management Console in the default browser.")
+        return 0
+    if parsed.utility == "shell-init":
+        print(render_zsh_init())
+        return 0
     if parsed.utility == "forward":
         if parsed.forward_action == "active":
             try:
