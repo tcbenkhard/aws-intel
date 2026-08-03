@@ -1,10 +1,10 @@
 """Tests for interactive account selection."""
 
-from io import StringIO
-import os
-import threading
-import time
+from contextlib import contextmanager
+from collections.abc import Iterator
 
+from prompt_toolkit.input import Input, create_pipe_input
+from prompt_toolkit.output import DummyOutput
 import pytest
 
 from aws_intel.login.selection import (
@@ -13,89 +13,88 @@ from aws_intel.login.selection import (
     select_elevated_access,
 )
 
-
-class InteractiveInput(StringIO):
-    def isatty(self) -> bool:
-        return True
-
-
-def test_selects_account_by_number() -> None:
-    output = StringIO()
-
-    selected = select_account(
-        ("development", "production"), InteractiveInput("2\n"), output
-    )
-
-    assert selected == "production"
-    assert output.getvalue() == (
-        "Select an AWS account:\n"
-        "  1. development\n"
-        "  2. production\n"
-        "Account [1-2]: "
-    )
+ENTER = "\r"
+ARROW_DOWN = "\x1b[B"
+CANCEL = "\x03"
 
 
-def test_reprompts_after_invalid_selection() -> None:
-    output = StringIO()
+@contextmanager
+def _typed(text: str) -> Iterator[Input]:
+    """Provide a prompt_toolkit input device pre-loaded with keystrokes."""
+    with create_pipe_input() as pipe_input:
+        pipe_input.send_text(text)
+        yield pipe_input
 
-    selected = select_account(("development",), InteractiveInput("no\n2\n1\n"), output)
+
+def test_selects_account_by_confirming_the_first_choice() -> None:
+    with _typed(ENTER) as pipe_input:
+        selected = select_account(
+            ("development", "production"), input=pipe_input, output=DummyOutput()
+        )
 
     assert selected == "development"
-    assert output.getvalue().count("Please enter a number between 1 and 1.") == 2
 
 
-def test_rejects_non_interactive_input() -> None:
+def test_selects_account_after_navigating_with_arrow_keys() -> None:
+    with _typed(ARROW_DOWN + ENTER) as pipe_input:
+        selected = select_account(
+            ("development", "production"), input=pipe_input, output=DummyOutput()
+        )
+
+    assert selected == "production"
+
+
+def test_rejects_non_interactive_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "aws_intel.interactive.selection.sys.stdin.isatty", lambda: False
+    )
+
     with pytest.raises(AccountSelectionError, match="account is required"):
-        select_account(("development",), StringIO("1\n"), StringIO())
+        select_account(("development",))
 
 
 def test_rejects_empty_account_list() -> None:
-    with pytest.raises(AccountSelectionError, match="no accounts are configured"):
-        select_account((), InteractiveInput(""), StringIO())
+    with _typed("") as pipe_input:
+        with pytest.raises(AccountSelectionError, match="no accounts are configured"):
+            select_account((), input=pipe_input, output=DummyOutput())
 
 
-def test_escape_immediately_cancels_account_selection() -> None:
-    master, slave = os.openpty()
-
-    def press_escape() -> None:
-        time.sleep(0.05)
-        os.write(master, b"\x1b")
-
-    writer = threading.Thread(target=press_escape)
-    try:
-        writer.start()
-        with os.fdopen(slave, encoding="utf-8", closefd=False) as terminal:
-            with pytest.raises(AccountSelectionError, match="was cancelled"):
-                select_account(("development",), terminal, StringIO())
-    finally:
-        writer.join()
-        os.close(master)
-        os.close(slave)
+def test_cancelling_account_selection_raises_error() -> None:
+    with _typed(CANCEL) as pipe_input:
+        with pytest.raises(AccountSelectionError, match="was cancelled"):
+            select_account(("development",), input=pipe_input, output=DummyOutput())
 
 
 def test_selects_team_elevated_access() -> None:
-    output = StringIO()
-
-    elevated = select_elevated_access(
-        "standard-access", "elevated-access", InteractiveInput("2\n"), output
-    )
+    with _typed(ARROW_DOWN + ENTER) as pipe_input:
+        elevated = select_elevated_access(
+            "standard-access",
+            "elevated-access",
+            input=pipe_input,
+            output=DummyOutput(),
+        )
 
     assert elevated is True
-    assert output.getvalue() == (
-        "Select access role:\n"
-        "  1. standard-access (standard access)\n"
-        "  2. elevated-access (TEAM elevated)\n"
-        "Access [1-2]: "
-    )
 
 
 def test_selects_standard_access() -> None:
-    assert (
-        select_elevated_access(
+    with _typed(ENTER) as pipe_input:
+        elevated = select_elevated_access(
             "standard-access",
             "elevated-access",
-            InteractiveInput("1\n"),
-            StringIO(),
+            input=pipe_input,
+            output=DummyOutput(),
         )
-        is False
+
+    assert elevated is False
+
+
+def test_rejects_non_interactive_input_for_elevated_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "aws_intel.interactive.selection.sys.stdin.isatty", lambda: False
     )
+
+    with pytest.raises(AccountSelectionError, match="--elevated is required"):
+        select_elevated_access("standard-access", "elevated-access")

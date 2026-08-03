@@ -11,6 +11,15 @@ CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 ProcessStarter = Callable[..., subprocess.Popen[bytes]]
 LocalPortChecker = Callable[[int], bool]
 REMOTE_HOST_DOCUMENT = "AWS-StartPortForwardingSessionToRemoteHost"
+NOT_LOGGED_IN_MESSAGE = (
+    "no active AWS session was found; run 'awsi login' to authenticate"
+)
+NOT_LOGGED_IN_DIAGNOSTICS = (
+    "you must specify a region",
+    "unable to locate credentials",
+    "the security token included in the request is expired",
+    "the config profile",
+)
 
 
 class ForwardingError(RuntimeError):
@@ -226,6 +235,13 @@ class AwsCliForwardingGateway:
                 "AWS CLI returned an unexpected response."
             ) from error
 
+    @staticmethod
+    def _looks_like_not_logged_in(diagnostic: str) -> bool:
+        lowered = diagnostic.lower()
+        return any(
+            fragment in lowered for fragment in NOT_LOGGED_IN_DIAGNOSTICS
+        )
+
     def _run_json(self, command: list[str]) -> dict[str, object]:
         """Run an AWS CLI query; the AWS CLI paginates automatically."""
         try:
@@ -241,6 +257,8 @@ class AwsCliForwardingGateway:
             ) from error
         if result.returncode != 0:
             diagnostic = result.stderr.strip() or "AWS CLI exited unsuccessfully"
+            if self._looks_like_not_logged_in(diagnostic):
+                raise ForwardingError(NOT_LOGGED_IN_MESSAGE)
             raise ForwardingError(diagnostic)
         try:
             response = json.loads(result.stdout)

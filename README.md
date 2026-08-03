@@ -252,6 +252,20 @@ The command reads `.awsi/forwards.yaml` from the current working directory,
 resolves the configured instance when necessary, and starts the forward using
 the saved host and port mapping.
 
+When run without a name or connection options in an interactive terminal,
+`awsi forward start` shows the saved forwards from `.awsi/forwards.yaml` and
+starts the selected one:
+
+```text
+$ awsi forward start
+Select a forward:
+  1. apigateway-dev
+  2. primary-database
+Forward 'apigateway-dev' started in the background with PID 4321.
+```
+
+Press Escape, Ctrl+C, or Ctrl+D to cancel the interactive selection.
+
 List all saved definitions with:
 
 ```shell
@@ -290,6 +304,20 @@ Stop every active forward with:
 ```console
 awsi forward stop --all
 ```
+
+When run without a name, PID, or `--all` in an interactive terminal,
+`awsi forward stop` shows only the active forwards and stops the selected
+one:
+
+```text
+$ awsi forward stop
+Select a forward:
+  1. primary-database (PID 4321)
+  2. PID 4322
+Forward 'primary-database' with PID 4321 was terminated.
+```
+
+Press Escape, Ctrl+C, or Ctrl+D to cancel the interactive selection.
 
 Restart an active forward by name or PID, preserving its current connection
 details, or restart every active forward:

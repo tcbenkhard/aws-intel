@@ -12,6 +12,11 @@ from aws_intel.forwarding.config import ForwardConfig, ForwardConfigError
 from aws_intel.forwarding.gateway import AwsCliForwardingGateway, ForwardingError
 from aws_intel.forwarding.model import ActiveForward, PortMapping, SavedForward
 from aws_intel.forwarding.registry import ForwardRegistry, ForwardRegistryError
+from aws_intel.forwarding.selection import (
+    ForwardSelectionError,
+    select_active_forward,
+    select_forward,
+)
 from aws_intel.login.config import AccountConfig, AccountConfigError
 from aws_intel.login.gateway import AwsCliLoginGateway, LoginError
 from aws_intel.login.selection import (
@@ -240,10 +245,12 @@ def create_parser() -> AwsIntelArgumentParser:
         ),
         epilog=(
             "Examples:\n"
+            "  awsi forward start\n"
             "  awsi forward start apigateway-dev\n"
             "  awsi forward save apigateway-dev --instance-name=bastion "
             "--host=api.internal --port=9072:9072\n"
             "  awsi forward active\n"
+            "  awsi forward stop\n"
             "  awsi forward stop apigateway-dev\n"
             "  awsi forward restart apigateway-dev\n"
             "  awsi forward hosts\n"
@@ -259,6 +266,7 @@ def create_parser() -> AwsIntelArgumentParser:
         help="Start a saved or explicitly described forward.",
         epilog=(
             "Examples:\n"
+            "  awsi forward start\n"
             "  awsi forward start apigateway-dev\n"
             "  awsi forward start apigateway-dev --instance-name=bastion "
             "--host=api.internal --port=9072:9072"
@@ -302,12 +310,13 @@ def create_parser() -> AwsIntelArgumentParser:
         help="Stop one or all active forwards.",
         epilog=(
             "Examples:\n"
+            "  awsi forward stop\n"
             "  awsi forward stop apigateway-dev\n"
             "  awsi forward stop 40234\n"
             "  awsi forward stop --all"
         ),
     )
-    stop_target = forward_stop.add_mutually_exclusive_group(required=True)
+    stop_target = forward_stop.add_mutually_exclusive_group(required=False)
     stop_target.add_argument("reference", nargs="?", metavar="NAME_OR_PID")
     stop_target.add_argument(
         "--all", action="store_true", help="Stop every active forward."
@@ -507,7 +516,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
             account = parsed.account
             standard_chain = None
             if account is None:
-                account = select_account(config.list_names(), sys.stdin, sys.stderr)
+                account = select_account(config.list_names())
                 if not parsed.elevated:
                     elevated_role = config.elevated_role_name(account)
                     if elevated_role is not None:
@@ -515,8 +524,6 @@ def main(arguments: Sequence[str] | None = None) -> int:
                         parsed.elevated = select_elevated_access(
                             standard_chain[-1].role_name,
                             elevated_role,
-                            sys.stdin,
-                            sys.stderr,
                         )
             chain = (
                 config.resolve_elevated(account)
@@ -555,6 +562,18 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 )
             return 0
         if parsed.forward_action in {"stop", "restart"}:
+            if (
+                parsed.forward_action == "stop"
+                and not parsed.all
+                and parsed.reference is None
+            ):
+                try:
+                    active_forwards = ForwardRegistry().list_active()
+                    selected_forward = select_active_forward(active_forwards)
+                except (ForwardRegistryError, ForwardSelectionError) as error:
+                    print(f"awsi: error: {error}", file=sys.stderr)
+                    return 1
+                parsed.reference = str(selected_forward.pid)
             restarted: list[ActiveForward] = []
             try:
                 registry = ForwardRegistry()
@@ -661,17 +680,25 @@ def main(arguments: Sequence[str] | None = None) -> int:
             return 0
 
         assert parsed.forward_action == "start"
+        has_connection_options = any(
+            value is not None
+            for value in (
+                parsed.instance_id,
+                parsed.instance_name,
+                parsed.host,
+                parsed.port,
+            )
+        )
+        if parsed.saved_forward is None and not has_connection_options:
+            try:
+                saved_names = tuple(saved.name for saved in ForwardConfig().list())
+                parsed.saved_forward = select_forward(saved_names)
+            except (ForwardConfigError, ForwardSelectionError) as error:
+                print(f"awsi: error: {error}", file=sys.stderr)
+                return 1
+
         forward_name = parsed.saved_forward
         if parsed.saved_forward is not None:
-            has_connection_options = any(
-                value is not None
-                for value in (
-                    parsed.instance_id,
-                    parsed.instance_name,
-                    parsed.host,
-                    parsed.port,
-                )
-            )
             if has_connection_options:
                 forward_name = parsed.saved_forward
             else:

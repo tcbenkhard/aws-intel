@@ -219,3 +219,28 @@ def test_reports_aws_cli_query_errors() -> None:
 
     with pytest.raises(ForwardingError, match="Access denied"):
         AwsCliForwardingGateway(runner).list_hosts()
+
+
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        "You must specify a region. You can also configure your region "
+        'by running "aws configure".',
+        "Unable to locate credentials. You can configure credentials by "
+        'running "aws configure".',
+        "The config profile (awsi-bootstrap) could not be found",
+        "An error occurred (ExpiredToken) when calling the "
+        "DescribeInstanceInformation operation: The security token "
+        "included in the request is expired",
+    ],
+)
+def test_reports_not_logged_in_instead_of_raw_aws_cli_diagnostic(
+    diagnostic: str,
+) -> None:
+    def runner(
+        command: list[str], **kwargs: object
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(command, 255, "", diagnostic)
+
+    with pytest.raises(ForwardingError, match="awsi login"):
+        AwsCliForwardingGateway(runner).list_hosts()

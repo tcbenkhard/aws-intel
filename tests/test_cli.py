@@ -176,7 +176,7 @@ def test_login_without_account_selects_interactively(
     monkeypatch.setattr("aws_intel.cli.AwsCliLoginGateway", FakeLoginGateway)
     monkeypatch.setattr(
         "aws_intel.cli.select_account",
-        lambda names, _input, _output: names[1],
+        lambda names: names[1],
     )
 
     assert main(["login"]) == 0
@@ -218,11 +218,11 @@ def test_login_without_account_can_select_team_elevated_access(
     monkeypatch.setattr("aws_intel.cli.AwsCliLoginGateway", FakeLoginGateway)
     monkeypatch.setattr(
         "aws_intel.cli.select_account",
-        lambda names, _input, _output: names[0],
+        lambda names: names[0],
     )
     monkeypatch.setattr(
         "aws_intel.cli.select_elevated_access",
-        lambda standard_role, elevated_role, _input, _output: (
+        lambda standard_role, elevated_role: (
             standard_role == "standard-access"
             and elevated_role == "elevated-access"
         ),
@@ -766,6 +766,86 @@ def test_forward_starts_named_configuration_from_current_directory(
     assert capsys.readouterr().out == (
         "Forward 'apigateway' started in the background with PID 4321.\n"
     )
+
+
+def test_forward_start_without_arguments_selects_and_starts_saved_forward(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_directory = tmp_path / ".awsi"
+    config_directory.mkdir()
+    (config_directory / "forwards.yaml").write_text(
+        "forwards:\n"
+        "  apigateway:\n"
+        "    instance-id: i-0123456789abcdef0\n"
+        "    host: api.internal\n"
+        "    port: 9072:443\n",
+        encoding="utf-8",
+    )
+    FakeForwardingGateway.starts = []
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway)
+    monkeypatch.setattr("aws_intel.cli.select_forward", lambda names: names[0])
+
+    result = main(["forward", "start"])
+
+    assert result == 0
+    assert FakeForwardingGateway.starts == [
+        (
+            "i-0123456789abcdef0",
+            "api.internal",
+            PortMapping(9072, 443),
+        )
+    ]
+    assert capsys.readouterr().out == (
+        "Forward 'apigateway' started in the background with PID 4321.\n"
+    )
+
+
+def test_forward_start_without_arguments_reports_no_saved_forwards(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["forward", "start"]) == 1
+    assert "no forwards are configured" in capsys.readouterr().err
+
+
+def test_forward_stop_without_arguments_selects_and_stops_active_forward(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    FakeForwardRegistry.active = (
+        ActiveForward(
+            9876,
+            "i-0123456789abcdef0",
+            "db.internal",
+            PortMapping(15432, 5432),
+            "primary-database",
+        ),
+    )
+    monkeypatch.setattr(
+        "aws_intel.cli.select_active_forward", lambda forwards: forwards[0]
+    )
+
+    result = main(["forward", "stop"])
+
+    assert result == 0
+    assert FakeForwardRegistry.active == ()
+    assert (
+        "Forward 'primary-database' with PID 9876 was terminated."
+        in capsys.readouterr().out
+    )
+
+
+def test_forward_stop_without_arguments_reports_no_active_forwards(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert main(["forward", "stop"]) == 1
+    assert "no active forwards are configured" in capsys.readouterr().err
 
 
 def test_forward_reports_unknown_saved_configuration(
