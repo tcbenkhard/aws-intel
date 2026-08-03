@@ -7,43 +7,45 @@ from prompt_toolkit.input import Input
 from prompt_toolkit.output import Output
 
 from aws_intel.forwarding.model import ActiveForward
-from aws_intel.interactive.selection import prompt_choice
+from aws_intel.interactive.selection import prompt_choices
 
 
 class ForwardSelectionError(RuntimeError):
     """Raised when a forward cannot be selected interactively."""
 
 
-def select_forward(
+def select_forwards(
     names: Sequence[str],
     *,
     input: Input | None = None,
     output: Output | None = None,
-) -> str:
-    """Prompt for one saved forward and return its name."""
+) -> tuple[str, ...]:
+    """Prompt for one or more saved forwards and return their names."""
     if not names:
         raise ForwardSelectionError("no forwards are configured")
 
-    return prompt_choice(
-        "Select a forward:",
+    selected = prompt_choices(
+        "Select forwards (space to toggle, enter to confirm):",
         list(names),
         error_type=ForwardSelectionError,
         non_interactive_message=(
             "a forward is required when input is not an interactive terminal"
         ),
         cancelled_message="forward selection was cancelled",
+        empty_selection_message="at least one forward must be selected",
         input=input,
         output=output,
     )
+    return tuple(selected)
 
 
-def select_active_forward(
+def select_active_forwards(
     forwards: Sequence[ActiveForward],
     *,
     input: Input | None = None,
     output: Output | None = None,
-) -> ActiveForward:
-    """Prompt for one active forward and return it."""
+) -> tuple[ActiveForward, ...]:
+    """Prompt for one or more active forwards and return them."""
     if not forwards:
         raise ForwardSelectionError("no active forwards are configured")
 
@@ -58,14 +60,16 @@ def select_active_forward(
         )
         for forward in forwards
     ]
-    return prompt_choice(
-        "Select a forward:",
+    selected = prompt_choices(
+        "Select forwards to stop (space to toggle, enter to confirm):",
         choices,
         error_type=ForwardSelectionError,
         non_interactive_message=(
             "an active forward is required when input is not an interactive terminal"
         ),
         cancelled_message="forward selection was cancelled",
+        empty_selection_message="at least one active forward must be selected",
         input=input,
         output=output,
     )
+    return tuple(selected)

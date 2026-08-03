@@ -768,6 +768,43 @@ def test_forward_starts_named_configuration_from_current_directory(
     )
 
 
+def test_forward_start_without_arguments_selects_and_starts_multiple_saved_forwards(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_directory = tmp_path / ".awsi"
+    config_directory.mkdir()
+    (config_directory / "forwards.yaml").write_text(
+        "forwards:\n"
+        "  apigateway:\n"
+        "    instance-id: i-0123456789abcdef0\n"
+        "    host: api.internal\n"
+        "    port: 9072:443\n"
+        "  database:\n"
+        "    instance-id: i-11111111\n"
+        "    host: db.internal\n"
+        "    port: 15432:5432\n",
+        encoding="utf-8",
+    )
+    FakeForwardingGateway.starts = []
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway)
+    monkeypatch.setattr("aws_intel.cli.select_forwards", lambda names: names)
+
+    result = main(["forward", "start"])
+
+    assert result == 0
+    assert FakeForwardingGateway.starts == [
+        ("i-0123456789abcdef0", "api.internal", PortMapping(9072, 443)),
+        ("i-11111111", "db.internal", PortMapping(15432, 5432)),
+    ]
+    assert capsys.readouterr().out == (
+        "Forward 'apigateway' started in the background with PID 4321.\n"
+        "Forward 'database' started in the background with PID 4321.\n"
+    )
+
+
 def test_forward_start_without_arguments_selects_and_starts_saved_forward(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -786,7 +823,7 @@ def test_forward_start_without_arguments_selects_and_starts_saved_forward(
     FakeForwardingGateway.starts = []
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway)
-    monkeypatch.setattr("aws_intel.cli.select_forward", lambda names: names[0])
+    monkeypatch.setattr("aws_intel.cli.select_forwards", lambda names: (names[0],))
 
     result = main(["forward", "start"])
 
@@ -828,7 +865,7 @@ def test_forward_stop_without_arguments_selects_and_stops_active_forward(
         ),
     )
     monkeypatch.setattr(
-        "aws_intel.cli.select_active_forward", lambda forwards: forwards[0]
+        "aws_intel.cli.select_active_forwards", lambda forwards: (forwards[0],)
     )
 
     result = main(["forward", "stop"])
@@ -838,6 +875,34 @@ def test_forward_stop_without_arguments_selects_and_stops_active_forward(
     assert (
         "Forward 'primary-database' with PID 9876 was terminated."
         in capsys.readouterr().out
+    )
+
+
+def test_forward_stop_without_arguments_selects_and_stops_multiple_active_forwards(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    FakeForwardRegistry.active = (
+        ActiveForward(
+            9876,
+            "i-0123456789abcdef0",
+            "db.internal",
+            PortMapping(15432, 5432),
+            "primary-database",
+        ),
+        ActiveForward(202, "i-22222222", "api.internal", PortMapping(3, 4)),
+    )
+    monkeypatch.setattr(
+        "aws_intel.cli.select_active_forwards", lambda forwards: forwards
+    )
+
+    result = main(["forward", "stop"])
+
+    assert result == 0
+    assert FakeForwardRegistry.active == ()
+    assert capsys.readouterr().out == (
+        "Forward 'primary-database' with PID 9876 was terminated.\n"
+        "Forward with PID 202 was terminated.\n"
     )
 
 

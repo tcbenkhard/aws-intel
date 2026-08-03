@@ -45,3 +45,33 @@ def prompt_choice(
     if selected is None:
         raise error_type(cancelled_message)
     return selected
+
+
+def prompt_choices(
+    message: str,
+    choices: Sequence[object],
+    *,
+    error_type: type[Exception],
+    non_interactive_message: str,
+    cancelled_message: str,
+    empty_selection_message: str,
+    input: Input | None = None,
+    output: Output | None = None,
+) -> list[object]:
+    """Prompt for one or more choices from a list using an interactive terminal."""
+    if input is None and not sys.stdin.isatty():
+        raise error_type(non_interactive_message)
+
+    try:
+        selected = questionary.checkbox(
+            message,
+            choices=list(choices),
+            **_prompt_toolkit_kwargs(input, output),
+        ).unsafe_ask()
+    except KeyboardInterrupt as error:
+        raise error_type(cancelled_message) from error
+    if selected is None:
+        raise error_type(cancelled_message)
+    if not selected:
+        raise error_type(empty_selection_message)
+    return selected

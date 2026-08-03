@@ -14,8 +14,8 @@ from aws_intel.forwarding.model import ActiveForward, PortMapping, SavedForward
 from aws_intel.forwarding.registry import ForwardRegistry, ForwardRegistryError
 from aws_intel.forwarding.selection import (
     ForwardSelectionError,
-    select_active_forward,
-    select_forward,
+    select_active_forwards,
+    select_forwards,
 )
 from aws_intel.login.config import AccountConfig, AccountConfigError
 from aws_intel.login.gateway import AwsCliLoginGateway, LoginError
@@ -269,7 +269,10 @@ def create_parser() -> AwsIntelArgumentParser:
             "  awsi forward start\n"
             "  awsi forward start apigateway-dev\n"
             "  awsi forward start apigateway-dev --instance-name=bastion "
-            "--host=api.internal --port=9072:9072"
+            "--host=api.internal --port=9072:9072\n"
+            "\n"
+            "Running 'awsi forward start' without a name prompts for one or "
+            "more saved forwards to start."
         ),
     )
     forward_start.add_argument(
@@ -313,7 +316,10 @@ def create_parser() -> AwsIntelArgumentParser:
             "  awsi forward stop\n"
             "  awsi forward stop apigateway-dev\n"
             "  awsi forward stop 40234\n"
-            "  awsi forward stop --all"
+            "  awsi forward stop --all\n"
+            "\n"
+            "Running 'awsi forward stop' without a name prompts for one or "
+            "more active forwards to stop."
         ),
     )
     stop_target = forward_stop.add_mutually_exclusive_group(required=False)
@@ -425,6 +431,41 @@ def create_parser() -> AwsIntelArgumentParser:
     )
     parser.utility_parsers = utilities.choices
     return parser
+
+
+def _start_forward(
+    parser: argparse.ArgumentParser,
+    instance_id: str | None,
+    instance_name: str | None,
+    host: str,
+    port_mapping: PortMapping,
+    forward_name: str | None,
+) -> int:
+    """Resolve the bastion instance, start, and register one forward."""
+    if instance_id is not None and not EC2_INSTANCE_ID.fullmatch(instance_id):
+        parser.error(
+            f"--instance-id {instance_id!r} must be an EC2 instance "
+            "ID such as i-0123456789abcdef0"
+        )
+    try:
+        gateway = AwsCliForwardingGateway()
+        resolved_instance_id = instance_id
+        if instance_name is not None:
+            with spinner("Resolving bastion instance..."):
+                resolved_instance_id = gateway.resolve_instance_name(instance_name)
+        assert resolved_instance_id is not None
+        registry = ForwardRegistry()
+        registry.ensure_startable(resolved_instance_id, host, port_mapping)
+        pid = gateway.start(resolved_instance_id, host, port_mapping)
+        registry.add(
+            ActiveForward(pid, resolved_instance_id, host, port_mapping, forward_name)
+        )
+    except (ForwardingError, ForwardRegistryError) as error:
+        print(f"awsi: error: {error}", file=sys.stderr)
+        return 1
+    label = f" {forward_name!r}" if forward_name is not None else ""
+    print(f"Forward{label} started in the background with PID {pid}.")
+    return 0
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
@@ -562,6 +603,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
                 )
             return 0
         if parsed.forward_action in {"stop", "restart"}:
+            selected_forwards: tuple[ActiveForward, ...] | None = None
             if (
                 parsed.forward_action == "stop"
                 and not parsed.all
@@ -569,21 +611,20 @@ def main(arguments: Sequence[str] | None = None) -> int:
             ):
                 try:
                     active_forwards = ForwardRegistry().list_active()
-                    selected_forward = select_active_forward(active_forwards)
+                    selected_forwards = select_active_forwards(active_forwards)
                 except (ForwardRegistryError, ForwardSelectionError) as error:
                     print(f"awsi: error: {error}", file=sys.stderr)
                     return 1
-                parsed.reference = str(selected_forward.pid)
             restarted: list[ActiveForward] = []
             try:
                 registry = ForwardRegistry()
-                if not parsed.all:
+                if selected_forwards is not None:
+                    targets = selected_forwards
+                elif parsed.all:
+                    targets = registry.list_active()
+                else:
                     assert parsed.reference is not None
-                targets = (
-                    registry.list_active()
-                    if parsed.all
-                    else (registry.resolve(parsed.reference),)
-                )
+                    targets = (registry.resolve(parsed.reference),)
                 stopped = tuple(
                     registry.terminate(str(forward.pid)) for forward in targets
                 )
@@ -692,10 +733,30 @@ def main(arguments: Sequence[str] | None = None) -> int:
         if parsed.saved_forward is None and not has_connection_options:
             try:
                 saved_names = tuple(saved.name for saved in ForwardConfig().list())
-                parsed.saved_forward = select_forward(saved_names)
+                selected_names = select_forwards(saved_names)
             except (ForwardConfigError, ForwardSelectionError) as error:
                 print(f"awsi: error: {error}", file=sys.stderr)
                 return 1
+            exit_code = 0
+            for name in selected_names:
+                try:
+                    saved_forward = ForwardConfig().load(name)
+                except ForwardConfigError as error:
+                    print(f"awsi: error: {error}", file=sys.stderr)
+                    exit_code = 1
+                    continue
+                exit_code = (
+                    _start_forward(
+                        parser,
+                        saved_forward.instance_id,
+                        saved_forward.instance_name,
+                        saved_forward.host,
+                        saved_forward.port_mapping,
+                        saved_forward.name,
+                    )
+                    or exit_code
+                )
+            return exit_code
 
         forward_name = parsed.saved_forward
         if parsed.saved_forward is not None:
@@ -722,30 +783,12 @@ def main(arguments: Sequence[str] | None = None) -> int:
             parser.error("forward requires --host")
         if parsed.port is None:
             parser.error("forward requires --port LOCAL_PORT:REMOTE_PORT")
-        if parsed.instance_id is not None and not EC2_INSTANCE_ID.fullmatch(
-            parsed.instance_id
-        ):
-            parser.error(
-                f"--instance-id {parsed.instance_id!r} must be an EC2 instance "
-                "ID such as i-0123456789abcdef0"
-            )
-        try:
-            gateway = AwsCliForwardingGateway()
-            instance_id = parsed.instance_id
-            if parsed.instance_name is not None:
-                with spinner("Resolving bastion instance..."):
-                    instance_id = gateway.resolve_instance_name(parsed.instance_name)
-            assert instance_id is not None
-            registry = ForwardRegistry()
-            registry.ensure_startable(instance_id, parsed.host, parsed.port)
-            pid = gateway.start(instance_id, parsed.host, parsed.port)
-            registry.add(
-                ActiveForward(pid, instance_id, parsed.host, parsed.port, forward_name)
-            )
-            label = f" {forward_name!r}" if forward_name is not None else ""
-            print(f"Forward{label} started in the background with PID {pid}.")
-            return 0
-        except (ForwardingError, ForwardRegistryError) as error:
-            print(f"awsi: error: {error}", file=sys.stderr)
-            return 1
+        return _start_forward(
+            parser,
+            parsed.instance_id,
+            parsed.instance_name,
+            parsed.host,
+            parsed.port,
+            forward_name,
+        )
     return 0
