@@ -123,6 +123,58 @@ def test_version_exits_successfully(capsys: pytest.CaptureFixture[str]) -> None:
     assert capsys.readouterr().out.startswith("awsi ")
 
 
+def test_init_writes_boilerplate_configuration_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = main(["init"])
+
+    accounts_path = tmp_path / ".awsi" / "accounts.yaml"
+    forwards_path = tmp_path / ".awsi" / "forwards.yaml"
+    assert result == 0
+    assert accounts_path.exists()
+    assert forwards_path.exists()
+    output = capsys.readouterr().out
+    assert f"Wrote boilerplate configuration to {accounts_path}." in output
+    assert f"Wrote boilerplate configuration to {forwards_path}." in output
+
+
+def test_init_skips_existing_files_without_force(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    accounts_path = tmp_path / ".awsi" / "accounts.yaml"
+    accounts_path.parent.mkdir(parents=True)
+    accounts_path.write_text("version: 1\naccounts: {}\n", encoding="utf-8")
+
+    result = main(["init"])
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert f"Skipped {accounts_path} (already exists)" in output
+    assert accounts_path.read_text(encoding="utf-8") == "version: 1\naccounts: {}\n"
+
+
+def test_init_force_overwrites_existing_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    accounts_path = tmp_path / ".awsi" / "accounts.yaml"
+    accounts_path.parent.mkdir(parents=True)
+    accounts_path.write_text("version: 1\naccounts: {}\n", encoding="utf-8")
+
+    result = main(["init", "--force"])
+
+    assert result == 0
+    assert accounts_path.read_text(encoding="utf-8") != "version: 1\naccounts: {}\n"
+
+
 def test_login_resolves_chain_and_opens_shell(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

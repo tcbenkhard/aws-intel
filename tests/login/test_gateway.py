@@ -92,6 +92,81 @@ def test_logs_in_assumes_role_and_opens_authenticated_shell(monkeypatch) -> None
     assert shell_environment["PS1"].startswith("[target] ")
 
 
+def test_assume_role_passes_configured_session_duration(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def runner(command, **options):
+        calls.append(command)
+        if command[:3] == ["aws", "sso", "login"]:
+            return subprocess.CompletedProcess(command, 0)
+        if command[:3] == ["aws", "configure", "export-credentials"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                json.dumps(
+                    {
+                        "AccessKeyId": "root-key",
+                        "SecretAccessKey": "root-secret",
+                        "SessionToken": "root-token",
+                        "Expiration": "2026-08-01T13:30:00Z",
+                    }
+                ),
+                "",
+            )
+        if command[:3] == ["aws", "sts", "assume-role"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                json.dumps(
+                    {
+                        "Credentials": {
+                            "AccessKeyId": "target-key",
+                            "SecretAccessKey": "target-secret",
+                            "SessionToken": "target-token",
+                            "Expiration": "2026-08-01T20:00:00+00:00",
+                        }
+                    }
+                ),
+                "",
+            )
+        if command[:3] == ["aws", "sts", "get-caller-identity"]:
+            return subprocess.CompletedProcess(
+                command, 0, json.dumps({"Account": "222222222222"}), ""
+            )
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setenv("SHELL", "/bin/test-shell")
+    chain = (
+        Account(
+            "hub",
+            "111111111111",
+            "standard-access",
+            "eu-west-1",
+            sso_start_url="https://example.awsapps.com/start",
+            sso_region="eu-west-1",
+        ),
+        Account(
+            "target",
+            "222222222222",
+            "standard-access",
+            "eu-central-1",
+            source="hub",
+            session_duration_hours=8,
+        ),
+    )
+
+    result = AwsCliLoginGateway(
+        runner, clock=lambda: datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
+    ).open_shell(chain)
+
+    assert result == 0
+    assume_command = next(
+        command for command in calls if command[:3] == ["aws", "sts", "assume-role"]
+    )
+    assert "--duration-seconds" in assume_command
+    assert assume_command[assume_command.index("--duration-seconds") + 1] == "28800"
+
+
 def test_reports_session_expiration(monkeypatch, capsys) -> None:
     def runner(command, **options):
         if command[:3] == ["aws", "sso", "login"]:

@@ -152,16 +152,19 @@ class AwsCliLoginGateway:
     def _assume_role(self, account: Account, source: Credentials) -> Credentials:
         environment = dict(os.environ)
         environment.update(source.environment())
-        response = self._run_json(
-            [
-                "aws", "sts", "assume-role",
-                "--role-arn", f"arn:aws:iam::{account.account_id}:role/{account.role_name}",
-                "--role-session-name", self._session_name(account.name),
-                "--region", account.region,
-                "--output", "json", "--no-cli-pager",
-            ],
-            environment,
-        )
+        command = [
+            "aws", "sts", "assume-role",
+            "--role-arn", f"arn:aws:iam::{account.account_id}:role/{account.role_name}",
+            "--role-session-name", self._session_name(account.name),
+            "--region", account.region,
+            "--output", "json", "--no-cli-pager",
+        ]
+        if account.session_duration_hours is not None:
+            command += [
+                "--duration-seconds",
+                str(account.session_duration_hours * 3600),
+            ]
+        response = self._run_json(command, environment)
         try:
             value = response["Credentials"]
         except (KeyError, TypeError) as error:

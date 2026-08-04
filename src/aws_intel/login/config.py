@@ -131,6 +131,7 @@ class AccountConfig:
             sso_start_url = definition.get("sso_start_url")
             sso_region = definition.get("sso_region")
             elevated_access = definition.get("elevated_access")
+            session_duration_hours = definition.get("session_duration_hours")
             string_values = (role_name, region, source, sso_start_url, sso_region)
             if (
                 not isinstance(account_id, str)
@@ -147,6 +148,14 @@ class AccountConfig:
                 raise TypeError
             if source is not None and (sso_start_url is not None or sso_region is not None):
                 raise TypeError
+            if session_duration_hours is not None and (
+                isinstance(session_duration_hours, bool)
+                or not isinstance(session_duration_hours, int)
+                or not 1 <= session_duration_hours <= 12
+            ):
+                raise TypeError
+            if session_duration_hours is not None and source is None:
+                raise TypeError
             return Account(
                 name=name,
                 account_id=account_id,
@@ -155,6 +164,7 @@ class AccountConfig:
                 source=source,
                 sso_start_url=sso_start_url,
                 sso_region=sso_region,
+                session_duration_hours=session_duration_hours,
             )
         except (KeyError, TypeError) as error:
             raise AccountConfigError(

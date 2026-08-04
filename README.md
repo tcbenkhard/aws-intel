@@ -44,6 +44,21 @@ awsi help forward
 awsi help login
 awsi help console
 awsi help shell-init
+awsi help init
+```
+
+Generate boilerplate `.awsi/accounts.yaml` and `.awsi/forwards.yaml` files
+populated with anonymized, plausible-looking example values, ready to edit
+into a real configuration:
+
+```shell
+awsi init
+```
+
+Existing files are left untouched unless `--force` is passed:
+
+```shell
+awsi init --force
 ```
 
 Open a shell authenticated to an account defined in `.awsi/accounts.yaml`:

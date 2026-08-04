@@ -17,6 +17,7 @@ from aws_intel.forwarding.selection import (
     select_active_forwards,
     select_forwards,
 )
+from aws_intel.init.generator import InitError, InitGenerator
 from aws_intel.login.config import AccountConfig, AccountConfigError
 from aws_intel.login.gateway import AwsCliLoginGateway, LoginError
 from aws_intel.login.selection import (
@@ -416,6 +417,23 @@ def create_parser() -> AwsIntelArgumentParser:
         choices=("zsh",),
         help="Shell whose initialization code should be printed.",
     )
+    init = utilities.add_parser(
+        "init",
+        prog="awsi init",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        help="Generate boilerplate .awsi configuration files.",
+        description=(
+            "Write example accounts.yaml and forwards.yaml files to .awsi, "
+            "populated with anonymized placeholder values, for editing into "
+            "a real configuration."
+        ),
+        epilog="Examples:\n  awsi init\n  awsi init --force",
+    )
+    init.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite any existing accounts.yaml or forwards.yaml.",
+    )
     help_utility = utilities.add_parser(
         "help",
         prog="awsi help",
@@ -585,6 +603,19 @@ def main(arguments: Sequence[str] | None = None) -> int:
         return 0
     if parsed.utility == "shell-init":
         print(render_zsh_init())
+        return 0
+    if parsed.utility == "init":
+        try:
+            result = InitGenerator().generate(force=parsed.force)
+        except InitError as error:
+            print(f"awsi: error: {error}", file=sys.stderr)
+            return 1
+        for path in result.written:
+            print(f"Wrote boilerplate configuration to {path}.")
+        for path in result.skipped:
+            print(
+                f"Skipped {path} (already exists); use --force to overwrite."
+            )
         return 0
     if parsed.utility == "forward":
         if parsed.forward_action == "active":
