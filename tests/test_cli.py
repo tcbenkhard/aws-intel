@@ -59,6 +59,7 @@ def test_help_utility_lists_all_utilities(
     assert "help" in normalized_output
     assert "Show all utilities or detailed help" in normalized_output
     assert "login" in normalized_output
+    assert "shell-init" not in normalized_output
 
 
 def test_help_utility_shows_detailed_utility_help(

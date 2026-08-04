@@ -405,7 +405,6 @@ def create_parser() -> AwsIntelArgumentParser:
         "shell-init",
         prog="awsi shell-init",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="Print shell integration code for the current shell.",
         description=(
             "Print code that labels an authenticated shell with its AWS "
             "account name. Evaluate it from the shell startup file."

@@ -43,7 +43,6 @@ awsi help security-group-tree
 awsi help forward
 awsi help login
 awsi help console
-awsi help shell-init
 awsi help init
 ```
 
