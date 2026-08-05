@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from prompt_toolkit.input import Input, create_pipe_input
 from prompt_toolkit.output import DummyOutput
 import pytest
+import questionary
 
 from aws_intel.forwarding.model import ActiveForward, PortMapping
 from aws_intel.forwarding.selection import (
@@ -56,6 +57,27 @@ def test_active_forward_is_visible_but_cannot_be_selected() -> None:
         )
 
     assert selected == ("database",)
+
+
+def test_active_forward_has_a_single_active_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_choices: list[questionary.Choice] = []
+
+    def capture_choices(
+        _message: str, choices: list[questionary.Choice], **_kwargs: object
+    ) -> list[str]:
+        captured_choices.extend(choices)
+        return []
+
+    monkeypatch.setattr(
+        "aws_intel.forwarding.selection.prompt_choices", capture_choices
+    )
+
+    select_forwards(("apigateway-dev",), active_names=("apigateway-dev",))
+
+    assert captured_choices[0].title == "apigateway-dev"
+    assert captured_choices[0].disabled == "active"
 
 
 def test_rejects_non_interactive_input(monkeypatch: pytest.MonkeyPatch) -> None:

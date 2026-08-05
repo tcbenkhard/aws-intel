@@ -28,9 +28,9 @@ def select_forwards(
     active = frozenset(active_names)
     choices = [
         questionary.Choice(
-            title=f"{name} (active)" if name in active else name,
+            title=name,
             value=name,
-            disabled="already active" if name in active else None,
+            disabled="active" if name in active else None,
         )
         for name in names
     ]
