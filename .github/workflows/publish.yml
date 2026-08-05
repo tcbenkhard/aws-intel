@@ -73,3 +73,18 @@ jobs:
       - name: Publish distributions to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
+      - name: Tag published version
+        run: |
+          version="$(poetry version --short)"
+          git tag --annotate "v${version}" --message "Release ${version}"
+          git push origin "v${version}"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(poetry version --short)"
+          gh release create "v${version}" \
+            --verify-tag \
+            --title "Release ${version}" \
+            --generate-notes
