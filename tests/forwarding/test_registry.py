@@ -127,7 +127,7 @@ def test_terminates_forward_by_name_or_pid(
     stopped = registry.terminate(reference)
 
     assert stopped.pid == expected_pid
-    assert signals == [(expected_pid, signal.SIGTERM)]
+    assert signals == [(expected_pid, signal.SIGKILL)]
     assert all(item.pid != expected_pid for item in registry.list_active())
 
 

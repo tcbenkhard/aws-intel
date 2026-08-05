@@ -54,7 +54,7 @@ class ForwardRegistry:
         forwards = list(self.list_active())
         selected = self.resolve(reference, tuple(forwards))
         try:
-            os.killpg(selected.pid, signal.SIGTERM)
+            os.killpg(selected.pid, signal.SIGKILL)
         except ProcessLookupError as error:
             self._write([forward for forward in forwards if forward != selected])
             raise ForwardNotFoundError(
