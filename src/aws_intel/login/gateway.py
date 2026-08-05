@@ -67,8 +67,9 @@ class AwsCliLoginGateway:
         environment["AWS_REGION"] = target.region
         environment["AWS_DEFAULT_REGION"] = target.region
         environment["AWSI_ACCOUNT"] = target.name
+        environment["AWSI_ROLE"] = target.role_name
         shell = environment.get("SHELL") or "/bin/sh"
-        self._set_account_prompt(environment, shell, target.name)
+        self._set_account_prompt(environment, shell, target.name, target.role_name)
         print(
             f"Authenticated as {target.name} ({target.account_id}) in {target.region}.\n"
             f"Session valid until {self._format_expiration(credentials.expires_at)} "
@@ -118,7 +119,11 @@ class AwsCliLoginGateway:
         rc_lines.extend(
             (
                 'if [[ -n ${AWSI_ACCOUNT:-} ]]; then',
-                '  PROMPT="[${AWSI_ACCOUNT}] ${PROMPT:-%n@%m %1~ %# }"',
+                '  if [[ -n ${AWSI_ROLE:-} ]]; then',
+                '    PROMPT="[${AWSI_ROLE}@${AWSI_ACCOUNT}] ${PROMPT:-%n@%m %1~ %# }"',
+                "  else",
+                '    PROMPT="[${AWSI_ACCOUNT}] ${PROMPT:-%n@%m %1~ %# }"',
+                "  fi",
                 "fi",
             )
         )
@@ -258,10 +263,13 @@ class AwsCliLoginGateway:
 
     @staticmethod
     def _set_account_prompt(
-        environment: dict[str, str], shell: str, account_name: str
+        environment: dict[str, str],
+        shell: str,
+        account_name: str,
+        role_name: str,
     ) -> None:
-        """Prefix common shell prompts while preserving an exported prompt."""
-        prefix = f"[{account_name}] "
+        """Prefix common shell prompts with the active role and account."""
+        prefix = f"[{role_name}@{account_name}] "
         shell_name = Path(shell).name
         if shell_name == "zsh":
             prompt = environment.get("PROMPT", "%n@%m %1~ %# ")

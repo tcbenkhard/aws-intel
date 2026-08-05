@@ -33,6 +33,7 @@ def boilerplate_accounts_document() -> dict[str, object]:
                 "elevated_access": {
                     "provider": "team",
                     "role_name": "ExampleChainedElevatedRole",
+                    "source_role": "ExampleSourceElevatedRole",
                 },
             },
         },

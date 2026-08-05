@@ -89,7 +89,8 @@ def test_logs_in_assumes_role_and_opens_authenticated_shell(monkeypatch) -> None
     assert shell_environment["AWS_ACCESS_KEY_ID"] == "target-key"
     assert shell_environment["AWS_REGION"] == "eu-central-1"
     assert shell_environment["AWSI_ACCOUNT"] == "target"
-    assert shell_environment["PS1"].startswith("[target] ")
+    assert shell_environment["AWSI_ROLE"] == "standard-access"
+    assert shell_environment["PS1"].startswith("[standard-access@target] ")
 
 
 def test_assume_role_passes_configured_session_duration(monkeypatch) -> None:
@@ -234,12 +235,14 @@ def test_elevated_login_explains_when_team_role_cannot_be_retrieved() -> None:
     assert "ForbiddenException" not in str(error.value)
 
 
-def test_prefixes_a_zsh_prompt_with_the_account_name() -> None:
+def test_prefixes_a_zsh_prompt_with_the_role_and_account_name() -> None:
     environment = {"PROMPT": "custom prompt % "}
 
-    AwsCliLoginGateway._set_account_prompt(environment, "/bin/zsh", "development")
+    AwsCliLoginGateway._set_account_prompt(
+        environment, "/bin/zsh", "development", "standard-access"
+    )
 
-    assert environment["PROMPT"] == "[development] custom prompt % "
+    assert environment["PROMPT"] == "[standard-access@development] custom prompt % "
 
 
 def test_zsh_wrapper_applies_prompt_after_normal_zshrc(tmp_path: Path) -> None:
@@ -253,7 +256,7 @@ def test_zsh_wrapper_applies_prompt_after_normal_zshrc(tmp_path: Path) -> None:
 
     rc = (wrapper / ".zshrc").read_text(encoding="utf-8")
     assert f"source {original / '.zshrc'}" in rc
-    assert rc.index("source ") < rc.index('PROMPT="[${AWSI_ACCOUNT}]')
+    assert rc.index("source ") < rc.index('PROMPT="[${AWSI_ROLE}@${AWSI_ACCOUNT}]')
 
 
 def test_zsh_process_keeps_account_prefix_when_zshrc_replaces_prompt(
@@ -279,8 +282,9 @@ def test_zsh_process_keeps_account_prefix_when_zshrc_replaces_prompt(
         {
             "HOME": str(tmp_path),
             "AWSI_ACCOUNT": "development",
+            "AWSI_ROLE": "standard-access",
             "PATH": "/usr/bin:/bin",
         },
     )
 
-    assert result.stdout.strip() == "[development] theme prompt"
+    assert result.stdout.strip() == "[standard-access@development] theme prompt"

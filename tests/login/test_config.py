@@ -76,7 +76,7 @@ accounts:
         AccountConfig(path).resolve_chain("first")
 
 
-def test_resolves_team_access_by_assuming_the_elevated_role_at_every_hop(
+def test_resolves_team_access_with_the_standard_role_in_the_source_by_default(
     tmp_path: Path,
 ) -> None:
     path = tmp_path / "accounts.yaml"
@@ -104,13 +104,67 @@ accounts:
     chain = AccountConfig(path).resolve_elevated("target")
 
     assert [account.name for account in chain] == ["hub", "target"]
-    assert chain[0].role_name == "elevated-access"
+    assert chain[0].role_name == "standard-access"
     assert chain[0].account_id == "111111111111"
     assert chain[0].sso_start_url == "https://example.awsapps.com/start"
     assert chain[0].sso_region == "eu-west-1"
     assert chain[1].role_name == "elevated-access"
     assert chain[1].account_id == "222222222222"
     assert AccountConfig(path).elevated_role_name("target") == "elevated-access"
+
+
+def test_resolves_team_access_with_an_explicit_source_role(tmp_path: Path) -> None:
+    path = tmp_path / "accounts.yaml"
+    path.write_text(
+        """
+version: 1
+accounts:
+  hub:
+    account_id: "111111111111"
+    role_name: standard-access
+    sso_start_url: https://example.awsapps.com/start
+    sso_region: eu-west-1
+  target:
+    account_id: "222222222222"
+    role_name: standard-access
+    source: hub
+    elevated_access:
+      provider: team
+      role_name: elevated-access
+      source_role: source-elevated-access
+""",
+        encoding="utf-8",
+    )
+
+    chain = AccountConfig(path).resolve_elevated("target")
+
+    assert [account.role_name for account in chain] == [
+        "source-elevated-access",
+        "elevated-access",
+    ]
+
+
+def test_rejects_an_invalid_elevated_source_role(tmp_path: Path) -> None:
+    path = tmp_path / "accounts.yaml"
+    path.write_text(
+        """
+version: 1
+accounts:
+  target:
+    account_id: "111111111111"
+    role_name: standard-access
+    sso_start_url: https://example.awsapps.com/start
+    sso_region: eu-west-1
+    elevated_access:
+      provider: team
+      role_name: elevated-access
+      source_role: ""
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AccountConfigError, match="valid TEAM elevated access"):
+        AccountConfig(path).resolve_elevated("target")
 
 
 def test_elevated_login_requires_team_configuration(tmp_path: Path) -> None:

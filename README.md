@@ -101,7 +101,7 @@ Press Escape, Ctrl+C, or Ctrl+D to cancel either interactive selection.
 
 After authentication, `awsi` reports the exact expiration returned by AWS and
 the time remaining before it opens the authenticated shell. It also prefixes
-the shell prompt with the active account name.
+the shell prompt with the active role and account name.
 
 From inside that authenticated shell, open the AWS Management Console with the
 same account and role in the default browser:
@@ -122,7 +122,7 @@ eval "$(awsi shell-init zsh)"
 For example, an authenticated prompt will start with:
 
 ```text
-[example-development] user@host project %
+[standard-access@example-development] user@host project %
 ```
 
 The normal prompt is unchanged outside an `awsi login` shell.
@@ -150,12 +150,14 @@ accounts:
     elevated_access:
       provider: team
       role_name: elevated-access
+      source_role: source-elevated-access
 ```
 
 Normal login continues to use the configured read-only role chain. Elevated
-login uses the TEAM role as a direct IAM Identity Center assignment. If the
-assignment is not active, `awsi` tells the user to request TEAM access and
-retry.
+login uses `elevated_access.role_name` for the target account. Source accounts
+retain their configured roles unless `elevated_access.source_role` specifies
+the role to use for those hops. If the TEAM assignment is not active, `awsi`
+tells the user to request TEAM access and retry.
 
 `awsi` supplies a temporary AWS CLI configuration only while completing the
 SSO login, so an existing `~/.aws/config` is not required or modified. The

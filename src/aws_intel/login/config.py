@@ -27,6 +27,11 @@ class AccountConfig:
 
     def elevated_role_name(self, name: str) -> str | None:
         """Return the configured TEAM role, if the account has one."""
+        elevated_access = self._elevated_access(name)
+        return elevated_access[0] if elevated_access is not None else None
+
+    def _elevated_access(self, name: str) -> tuple[str, str | None] | None:
+        """Return the target and optional source roles for elevated access."""
         accounts = self._read()
         definition = accounts.get(name)
         if definition is None:
@@ -41,9 +46,18 @@ class AccountConfig:
                 raise TypeError
             provider = elevated_access.get("provider")
             role_name = elevated_access["role_name"]
-            if provider != "team" or not isinstance(role_name, str) or not role_name:
+            source_role = elevated_access.get("source_role")
+            if (
+                provider != "team"
+                or not isinstance(role_name, str)
+                or not role_name
+                or (
+                    source_role is not None
+                    and (not isinstance(source_role, str) or not source_role)
+                )
+            ):
                 raise TypeError
-            return role_name
+            return role_name, source_role
         except (KeyError, TypeError) as error:
             raise AccountConfigError(
                 f"account {name!r} does not define valid TEAM elevated access"
@@ -79,15 +93,21 @@ class AccountConfig:
         return tuple(chain)
 
     def resolve_elevated(self, name: str) -> tuple[Account, ...]:
-        """Resolve the account chain, assuming the TEAM role at every hop."""
+        """Resolve a chain with elevated target and optional source roles."""
         chain = self.resolve_chain(name)
-        role_name = self.elevated_role_name(name)
-        if role_name is None:
+        elevated_access = self._elevated_access(name)
+        if elevated_access is None:
             raise AccountConfigError(
                 f"account {name!r} does not define TEAM elevated access"
             )
+        role_name, source_role = elevated_access
 
-        return tuple(replace(account, role_name=role_name) for account in chain)
+        sources = chain[:-1]
+        if source_role is not None:
+            sources = tuple(
+                replace(account, role_name=source_role) for account in sources
+            )
+        return (*sources, replace(chain[-1], role_name=role_name))
 
     def _read(self) -> dict[str, object]:
         try:
