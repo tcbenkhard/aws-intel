@@ -68,8 +68,12 @@ class AwsCliLoginGateway:
         environment["AWS_DEFAULT_REGION"] = target.region
         environment["AWSI_ACCOUNT"] = target.name
         environment["AWSI_ROLE"] = target.role_name
+        if target.color is not None:
+            environment["AWSI_COLOR"] = target.color
         shell = environment.get("SHELL") or "/bin/sh"
-        self._set_account_prompt(environment, shell, target.name, target.role_name)
+        self._set_account_prompt(
+            environment, shell, target.name, target.role_name, target.color
+        )
         print(
             f"Authenticated as {target.name} ({target.account_id}) in {target.region}.\n"
             f"Session valid until {self._format_expiration(credentials.expires_at)} "
@@ -120,10 +124,15 @@ class AwsCliLoginGateway:
             (
                 'if [[ -n ${AWSI_ACCOUNT:-} ]]; then',
                 '  if [[ -n ${AWSI_ROLE:-} ]]; then',
-                '    PROMPT="[${AWSI_ROLE}@${AWSI_ACCOUNT}] ${PROMPT:-%n@%m %1~ %# }"',
+                '    _awsi_label="[${AWSI_ROLE}@${AWSI_ACCOUNT}] "',
                 "  else",
-                '    PROMPT="[${AWSI_ACCOUNT}] ${PROMPT:-%n@%m %1~ %# }"',
+                '    _awsi_label="[${AWSI_ACCOUNT}] "',
                 "  fi",
+                '  if [[ -n ${AWSI_COLOR:-} ]]; then',
+                '    _awsi_label="%F{${AWSI_COLOR}}${_awsi_label}%f"',
+                "  fi",
+                '  PROMPT="${_awsi_label}${PROMPT:-%n@%m %1~ %# }"',
+                "  unset _awsi_label",
                 "fi",
             )
         )
@@ -267,15 +276,20 @@ class AwsCliLoginGateway:
         shell: str,
         account_name: str,
         role_name: str,
+        color: str | None = None,
     ) -> None:
         """Prefix common shell prompts with the active role and account."""
         prefix = f"[{role_name}@{account_name}] "
         shell_name = Path(shell).name
         if shell_name == "zsh":
             prompt = environment.get("PROMPT", "%n@%m %1~ %# ")
-            environment["PROMPT"] = prefix + prompt
+            colored_prefix = f"%F{{{color}}}{prefix}%f" if color else prefix
+            environment["PROMPT"] = colored_prefix + prompt
             return
         prompt = environment.get("PS1", r"\u@\h \W \$ ")
+        if color:
+            red, green, blue = (int(color[index:index + 2], 16) for index in (1, 3, 5))
+            prefix = f"\\[\\033[38;2;{red};{green};{blue}m\\]{prefix}\\[\\033[0m\\]"
         environment["PS1"] = prefix + prompt
 
     @staticmethod

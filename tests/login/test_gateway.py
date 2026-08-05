@@ -245,6 +245,18 @@ def test_prefixes_a_zsh_prompt_with_the_role_and_account_name() -> None:
     assert environment["PROMPT"] == "[standard-access@development] custom prompt % "
 
 
+def test_colors_only_the_zsh_account_label() -> None:
+    environment = {"PROMPT": "custom prompt % "}
+
+    AwsCliLoginGateway._set_account_prompt(
+        environment, "/bin/zsh", "development", "standard-access", "#12ABEF"
+    )
+
+    assert environment["PROMPT"] == (
+        "%F{#12ABEF}[standard-access@development] %fcustom prompt % "
+    )
+
+
 def test_zsh_wrapper_applies_prompt_after_normal_zshrc(tmp_path: Path) -> None:
     original = tmp_path / "original"
     wrapper = tmp_path / "wrapper"
@@ -256,7 +268,9 @@ def test_zsh_wrapper_applies_prompt_after_normal_zshrc(tmp_path: Path) -> None:
 
     rc = (wrapper / ".zshrc").read_text(encoding="utf-8")
     assert f"source {original / '.zshrc'}" in rc
-    assert rc.index("source ") < rc.index('PROMPT="[${AWSI_ROLE}@${AWSI_ACCOUNT}]')
+    assert rc.index("source ") < rc.index(
+        '_awsi_label="[${AWSI_ROLE}@${AWSI_ACCOUNT}] "'
+    )
 
 
 def test_zsh_process_keeps_account_prefix_when_zshrc_replaces_prompt(

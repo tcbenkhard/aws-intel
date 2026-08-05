@@ -17,6 +17,7 @@ def boilerplate_accounts_document() -> dict[str, object]:
                 "account_id": "111111111111",
                 "role_name": "ExampleSourceRole",
                 "region": "eu-west-1",
+                "color": "#4F8EF7",
                 "sso_start_url": "https://example.awsapps.com/start",
                 "sso_region": "eu-west-1",
                 "elevated_access": {
@@ -28,6 +29,7 @@ def boilerplate_accounts_document() -> dict[str, object]:
                 "account_id": "222222222222",
                 "role_name": "ExampleChainedRole",
                 "region": "eu-west-1",
+                "color": "#F59E0B",
                 "source": "example-source",
                 "session_duration_hours": 4,
                 "elevated_access": {

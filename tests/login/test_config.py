@@ -54,6 +54,71 @@ accounts:
     assert chain[1].source == "hub"
 
 
+def test_resolves_an_account_label_color(tmp_path: Path) -> None:
+    path = tmp_path / "accounts.yaml"
+    path.write_text(
+        """
+version: 1
+accounts:
+  development:
+    account_id: "111111111111"
+    role_name: standard-access
+    color: "#12aBcF"
+    sso_start_url: https://example.awsapps.com/start
+    sso_region: eu-west-1
+""",
+        encoding="utf-8",
+    )
+
+    assert AccountConfig(path).resolve_chain("development")[0].color == "#12aBcF"
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [("red", "#FF0000"), ("BLACK", "#000000"), ("aqua", "#00FFFF")],
+)
+def test_resolves_css_basic_account_label_colors(
+    tmp_path: Path, configured: str, expected: str
+) -> None:
+    path = tmp_path / "accounts.yaml"
+    path.write_text(
+        f"""
+version: 1
+accounts:
+  development:
+    account_id: "111111111111"
+    role_name: standard-access
+    color: {configured}
+    sso_start_url: https://example.awsapps.com/start
+    sso_region: eu-west-1
+""",
+        encoding="utf-8",
+    )
+
+    assert AccountConfig(path).resolve_chain("development")[0].color == expected
+
+
+@pytest.mark.parametrize("color", ["reddish", "#12345", "#1234567", "#GG0000"])
+def test_rejects_an_invalid_account_label_color(tmp_path: Path, color: str) -> None:
+    path = tmp_path / "accounts.yaml"
+    path.write_text(
+        f"""
+version: 1
+accounts:
+  development:
+    account_id: "111111111111"
+    role_name: standard-access
+    color: "{color}"
+    sso_start_url: https://example.awsapps.com/start
+    sso_region: eu-west-1
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AccountConfigError, match="account 'development'.*invalid"):
+        AccountConfig(path).resolve_chain("development")
+
+
 def test_rejects_a_chain_cycle(tmp_path: Path) -> None:
     path = tmp_path / "accounts.yaml"
     path.write_text(

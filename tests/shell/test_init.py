@@ -8,6 +8,8 @@ def test_zsh_init_labels_only_authenticated_shells() -> None:
 
     assert "AWSI_ACCOUNT" in script
     assert "AWSI_ROLE" in script
+    assert "AWSI_COLOR" in script
+    assert '"%F{${AWSI_COLOR}}${_awsi_prompt_prefix}%f"' in script
     assert '"[${AWSI_ROLE}@${AWSI_ACCOUNT}] "' in script
     assert 'PROMPT="${_awsi_prompt_prefix}${PROMPT' in script
-    assert "unset _awsi_prompt_prefix" in script
+    assert "unset _awsi_prompt_prefix _awsi_plain_prefix" in script

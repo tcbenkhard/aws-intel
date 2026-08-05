@@ -9,6 +9,25 @@ import yaml
 from aws_intel.login.model import Account
 
 ACCOUNT_ID = re.compile(r"^[0-9]{12}$")
+HEX_COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
+CSS_BASIC_COLORS = {
+    "black": "#000000",
+    "silver": "#C0C0C0",
+    "gray": "#808080",
+    "white": "#FFFFFF",
+    "maroon": "#800000",
+    "red": "#FF0000",
+    "purple": "#800080",
+    "fuchsia": "#FF00FF",
+    "green": "#008000",
+    "lime": "#00FF00",
+    "olive": "#808000",
+    "yellow": "#FFFF00",
+    "navy": "#000080",
+    "blue": "#0000FF",
+    "teal": "#008080",
+    "aqua": "#00FFFF",
+}
 
 
 class AccountConfigError(RuntimeError):
@@ -142,6 +161,7 @@ class AccountConfig:
             sso_region = definition.get("sso_region")
             elevated_access = definition.get("elevated_access")
             session_duration_hours = definition.get("session_duration_hours")
+            color = definition.get("color")
             string_values = (role_name, region, source, sso_start_url, sso_region)
             if (
                 not isinstance(account_id, str)
@@ -150,6 +170,16 @@ class AccountConfig:
                 or not role_name
                 or not region
                 or source == name
+                or (
+                    color is not None
+                    and (
+                        not isinstance(color, str)
+                        or (
+                            not HEX_COLOR.fullmatch(color)
+                            and color.lower() not in CSS_BASIC_COLORS
+                        )
+                    )
+                )
                 or (
                     elevated_access is not None
                     and not isinstance(elevated_access, dict)
@@ -175,6 +205,11 @@ class AccountConfig:
                 sso_start_url=sso_start_url,
                 sso_region=sso_region,
                 session_duration_hours=session_duration_hours,
+                color=(
+                    CSS_BASIC_COLORS.get(color.lower(), color)
+                    if isinstance(color, str)
+                    else None
+                ),
             )
         except (KeyError, TypeError) as error:
             raise AccountConfigError(

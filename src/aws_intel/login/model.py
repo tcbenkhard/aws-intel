@@ -16,6 +16,7 @@ class Account:
     sso_start_url: str | None = None
     sso_region: str | None = None
     session_duration_hours: int | None = None
+    color: str | None = None
 
 
 @dataclass(frozen=True)

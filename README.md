@@ -85,6 +85,7 @@ accounts:
     account_id: "111111111111"
     role_name: ExampleSourceRole
     region: eu-west-1
+    color: "#4F8EF7"
     sso_start_url: https://example.awsapps.com/start
     sso_region: eu-west-1
     elevated_access:
@@ -95,6 +96,7 @@ accounts:
     account_id: "222222222222"
     role_name: ExampleChainedRole
     region: eu-central-1
+    color: "#F59E0B"
     source: example-source
     session_duration_hours: 4
     elevated_access:
@@ -112,6 +114,7 @@ accounts:
 | `account_id` | Yes | The 12-digit AWS account ID. Quote it so YAML treats it as a string. |
 | `role_name` | Yes | IAM role used for standard access to this account. |
 | `region` | No | AWS Region used after login and while assuming this account's role. Defaults to `eu-west-1`. |
+| `color` | No | Color of the authenticated shell label. Use a CSS basic color name or a quoted `#RRGGBB` hex value. Requires a terminal with true-color support. |
 | `source` | Chained accounts only | Name of another entry in `accounts` through which this role is assumed. Chains may contain multiple accounts but may not contain cycles. |
 | `sso_start_url` | Root accounts only | IAM Identity Center access-portal URL. Required on the root of a login chain and invalid when `source` is set. |
 | `sso_region` | Root accounts only | Region containing the IAM Identity Center configuration. Required on the root of a login chain and invalid when `source` is set. |
@@ -126,6 +129,17 @@ in the chain must use `source` instead. Temporary credentials are placed only
 in the authenticated subshell environment; AWS Intel does not modify
 `~/.aws/config` or write credentials to the repository or
 `~/.aws/credentials`.
+
+The supported CSS basic color names are `black`, `silver`, `gray`, `white`,
+`maroon`, `red`, `purple`, `fuchsia`, `green`, `lime`, `olive`, `yellow`,
+`navy`, `blue`, `teal`, and `aqua`. Names are case-insensitive. Custom colors
+must be quoted so YAML does not interpret the leading `#` as a comment:
+
+```yaml
+color: red
+# or use a custom RGB value:
+# color: "#123123"
+```
 
 ### Saved port forwards
 
