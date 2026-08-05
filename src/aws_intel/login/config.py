@@ -1,5 +1,6 @@
 """Load account login chains from .awsi/accounts.yaml."""
 
+from dataclasses import replace
 from pathlib import Path
 import re
 
@@ -78,26 +79,15 @@ class AccountConfig:
         return tuple(chain)
 
     def resolve_elevated(self, name: str) -> tuple[Account, ...]:
-        """Resolve a TEAM role as a direct IAM Identity Center login."""
+        """Resolve the account chain, assuming the TEAM role at every hop."""
         chain = self.resolve_chain(name)
-        target = chain[-1]
-        root = chain[0]
         role_name = self.elevated_role_name(name)
         if role_name is None:
             raise AccountConfigError(
                 f"account {name!r} does not define TEAM elevated access"
             )
 
-        return (
-            Account(
-                name=target.name,
-                account_id=target.account_id,
-                role_name=role_name,
-                region=target.region,
-                sso_start_url=root.sso_start_url,
-                sso_region=root.sso_region,
-            ),
-        )
+        return tuple(replace(account, role_name=role_name) for account in chain)
 
     def _read(self) -> dict[str, object]:
         try:

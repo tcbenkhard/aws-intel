@@ -76,7 +76,9 @@ accounts:
         AccountConfig(path).resolve_chain("first")
 
 
-def test_resolves_team_access_as_direct_sso_login(tmp_path: Path) -> None:
+def test_resolves_team_access_by_assuming_the_elevated_role_at_every_hop(
+    tmp_path: Path,
+) -> None:
     path = tmp_path / "accounts.yaml"
     path.write_text(
         """
@@ -101,12 +103,13 @@ accounts:
 
     chain = AccountConfig(path).resolve_elevated("target")
 
-    assert len(chain) == 1
-    assert chain[0].name == "target"
+    assert [account.name for account in chain] == ["hub", "target"]
     assert chain[0].role_name == "elevated-access"
-    assert chain[0].account_id == "222222222222"
+    assert chain[0].account_id == "111111111111"
     assert chain[0].sso_start_url == "https://example.awsapps.com/start"
     assert chain[0].sso_region == "eu-west-1"
+    assert chain[1].role_name == "elevated-access"
+    assert chain[1].account_id == "222222222222"
     assert AccountConfig(path).elevated_role_name("target") == "elevated-access"
 
 

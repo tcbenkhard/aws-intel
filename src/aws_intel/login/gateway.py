@@ -46,6 +46,8 @@ class AwsCliLoginGateway:
             )
             try:
                 credentials = self._export_credentials(bootstrap_environment)
+                for account in chain[1:]:
+                    credentials = self._assume_role(account, credentials)
             except LoginError as error:
                 if elevated:
                     target = chain[-1]
@@ -55,8 +57,6 @@ class AwsCliLoginGateway:
                         "and retry"
                     ) from error
                 raise
-            for account in chain[1:]:
-                credentials = self._assume_role(account, credentials)
 
         target = chain[-1]
         self._verify_identity(target, credentials)

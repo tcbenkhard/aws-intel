@@ -45,9 +45,13 @@ def test_accounts_document_resolves_elevated_access_for_both_accounts(
 
     for name in ("example-source", "example-chained"):
         elevated = config.resolve_elevated(name)
-        assert len(elevated) == 1
+        assert elevated[-1].name == name
         assert elevated[0].sso_start_url is not None
         assert elevated[0].sso_region is not None
+        assert all(
+            account.role_name == config.elevated_role_name(name)
+            for account in elevated
+        )
 
 
 def test_forwards_document_loads_as_a_valid_forward(tmp_path: Path) -> None:
