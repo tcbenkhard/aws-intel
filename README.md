@@ -307,8 +307,10 @@ awsi forward restart --all
 ```
 
 Running `awsi forward start` without arguments interactively selects one or
-more saved definitions. Running `awsi forward stop` without a name, PID, or
-`--all` interactively selects active sessions. Active-session output is
+more saved definitions. Saved forwards that are already running remain visible
+in the selection overview as active, but cannot be selected again. Running
+`awsi forward stop` without a name, PID, or `--all` interactively selects
+active sessions. Active-session output is
 tab-separated and includes a header. AWS Intel rejects duplicate active
 forwards and unavailable local ports before starting a background session.
 

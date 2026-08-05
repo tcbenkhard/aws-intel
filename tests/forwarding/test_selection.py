@@ -46,6 +46,18 @@ def test_selects_multiple_forwards_after_navigating_with_arrow_keys() -> None:
     assert selected == ("apigateway-dev", "database")
 
 
+def test_active_forward_is_visible_but_cannot_be_selected() -> None:
+    with _typed(SPACE + ENTER) as pipe_input:
+        selected = select_forwards(
+            ("apigateway-dev", "database"),
+            active_names=("apigateway-dev",),
+            input=pipe_input,
+            output=DummyOutput(),
+        )
+
+    assert selected == ("database",)
+
+
 def test_rejects_non_interactive_input(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "aws_intel.interactive.selection.sys.stdin.isatty", lambda: False
@@ -66,17 +78,13 @@ def test_rejects_confirming_without_toggling_any_choice() -> None:
         with pytest.raises(
             ForwardSelectionError, match="at least one forward must be selected"
         ):
-            select_forwards(
-                ("apigateway-dev",), input=pipe_input, output=DummyOutput()
-            )
+            select_forwards(("apigateway-dev",), input=pipe_input, output=DummyOutput())
 
 
 def test_cancelling_forward_selection_raises_error() -> None:
     with _typed(CANCEL) as pipe_input:
         with pytest.raises(ForwardSelectionError, match="was cancelled"):
-            select_forwards(
-                ("apigateway-dev",), input=pipe_input, output=DummyOutput()
-            )
+            select_forwards(("apigateway-dev",), input=pipe_input, output=DummyOutput())
 
 
 def test_selects_one_active_forward_by_toggling_the_first_choice() -> None:

@@ -187,9 +187,7 @@ def test_login_resolves_chain_and_opens_shell(
             return expected_chain
 
     class FakeLoginGateway:
-        def open_shell(
-            self, chain: tuple[object, ...], elevated: bool = False
-        ) -> int:
+        def open_shell(self, chain: tuple[object, ...], elevated: bool = False) -> int:
             assert chain is expected_chain
             assert elevated is False
             return 0
@@ -218,9 +216,7 @@ def test_login_without_account_selects_interactively(
             return None
 
     class FakeLoginGateway:
-        def open_shell(
-            self, chain: tuple[object, ...], elevated: bool = False
-        ) -> int:
+        def open_shell(self, chain: tuple[object, ...], elevated: bool = False) -> int:
             assert chain is expected_chain
             assert elevated is False
             return 0
@@ -254,15 +250,14 @@ def test_login_without_account_can_select_team_elevated_access(
 
         def resolve_chain(self, name: str) -> tuple[object, ...]:
             assert name == "development"
+
             class StandardAccount:
                 role_name = "standard-access"
 
             return (StandardAccount(),)
 
     class FakeLoginGateway:
-        def open_shell(
-            self, chain: tuple[object, ...], elevated: bool = False
-        ) -> int:
+        def open_shell(self, chain: tuple[object, ...], elevated: bool = False) -> int:
             assert chain is expected_chain
             assert elevated is True
             return 0
@@ -276,8 +271,7 @@ def test_login_without_account_can_select_team_elevated_access(
     monkeypatch.setattr(
         "aws_intel.cli.select_elevated_access",
         lambda standard_role, elevated_role: (
-            standard_role == "standard-access"
-            and elevated_role == "elevated-access"
+            standard_role == "standard-access" and elevated_role == "elevated-access"
         ),
     )
 
@@ -297,9 +291,7 @@ def test_login_list_prints_configured_accounts_without_logging_in(
             pytest.fail("login gateway should not be created when listing accounts")
 
     monkeypatch.setattr("aws_intel.cli.AccountConfig", FakeAccountConfig)
-    monkeypatch.setattr(
-        "aws_intel.cli.AwsCliLoginGateway", UnexpectedLoginGateway
-    )
+    monkeypatch.setattr("aws_intel.cli.AwsCliLoginGateway", UnexpectedLoginGateway)
 
     assert main(["login", "--list"]) == 0
     assert capsys.readouterr().out == "ACCOUNT\ndevelopment\nproduction\n"
@@ -326,9 +318,7 @@ def test_elevated_login_resolves_team_role_and_opens_shell(
             return expected_chain
 
     class FakeLoginGateway:
-        def open_shell(
-            self, chain: tuple[object, ...], elevated: bool = False
-        ) -> int:
+        def open_shell(self, chain: tuple[object, ...], elevated: bool = False) -> int:
             assert chain is expected_chain
             assert elevated is True
             return 0
@@ -843,7 +833,15 @@ def test_forward_start_without_arguments_selects_and_starts_multiple_saved_forwa
     FakeForwardingGateway.starts = []
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway)
-    monkeypatch.setattr("aws_intel.cli.select_forwards", lambda names: names)
+    selected: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
+
+    def select(
+        names: tuple[str, ...], *, active_names: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        selected.append((names, active_names))
+        return names
+
+    monkeypatch.setattr("aws_intel.cli.select_forwards", select)
 
     result = main(["forward", "start"])
 
@@ -852,6 +850,7 @@ def test_forward_start_without_arguments_selects_and_starts_multiple_saved_forwa
         ("i-0123456789abcdef0", "api.internal", PortMapping(9072, 443)),
         ("i-11111111", "db.internal", PortMapping(15432, 5432)),
     ]
+    assert selected == [(("apigateway", "database"), ())]
     assert capsys.readouterr().out == (
         "Forward 'apigateway' started in the background with PID 4321.\n"
         "Forward 'database' started in the background with PID 4321.\n"
@@ -876,7 +875,10 @@ def test_forward_start_without_arguments_selects_and_starts_saved_forward(
     FakeForwardingGateway.starts = []
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway)
-    monkeypatch.setattr("aws_intel.cli.select_forwards", lambda names: (names[0],))
+    monkeypatch.setattr(
+        "aws_intel.cli.select_forwards",
+        lambda names, *, active_names: (names[0],),
+    )
 
     result = main(["forward", "start"])
 
@@ -891,6 +893,54 @@ def test_forward_start_without_arguments_selects_and_starts_saved_forward(
     assert capsys.readouterr().out == (
         "Forward 'apigateway' started in the background with PID 4321.\n"
     )
+
+
+def test_forward_start_disables_running_saved_forwards_in_selection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_directory = tmp_path / ".awsi"
+    config_directory.mkdir()
+    (config_directory / "forwards.yaml").write_text(
+        "forwards:\n"
+        "  apigateway:\n"
+        "    instance-id: i-0123456789abcdef0\n"
+        "    host: api.internal\n"
+        "    port: 9072:443\n"
+        "  database:\n"
+        "    instance-id: i-11111111\n"
+        "    host: db.internal\n"
+        "    port: 15432:5432\n",
+        encoding="utf-8",
+    )
+    FakeForwardRegistry.active = (
+        ActiveForward(
+            9876,
+            "i-0123456789abcdef0",
+            "api.internal",
+            PortMapping(9072, 443),
+            "apigateway",
+        ),
+    )
+    received_active_names: list[tuple[str, ...]] = []
+
+    def select(
+        names: tuple[str, ...], *, active_names: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        assert names == ("apigateway", "database")
+        received_active_names.append(active_names)
+        return ("database",)
+
+    FakeForwardingGateway.starts = []
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("aws_intel.cli.select_forwards", select)
+    monkeypatch.setattr("aws_intel.cli.AwsCliForwardingGateway", FakeForwardingGateway)
+
+    assert main(["forward", "start"]) == 0
+    assert received_active_names == [("apigateway",)]
+    assert FakeForwardingGateway.starts == [
+        ("i-11111111", "db.internal", PortMapping(15432, 5432))
+    ]
 
 
 def test_forward_start_without_arguments_reports_no_saved_forwards(

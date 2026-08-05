@@ -612,9 +612,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         for path in result.written:
             print(f"Wrote boilerplate configuration to {path}.")
         for path in result.skipped:
-            print(
-                f"Skipped {path} (already exists); use --force to overwrite."
-            )
+            print(f"Skipped {path} (already exists); use --force to overwrite.")
         return 0
     if parsed.utility == "forward":
         if parsed.forward_action == "active":
@@ -763,8 +761,17 @@ def main(arguments: Sequence[str] | None = None) -> int:
         if parsed.saved_forward is None and not has_connection_options:
             try:
                 saved_names = tuple(saved.name for saved in ForwardConfig().list())
-                selected_names = select_forwards(saved_names)
-            except (ForwardConfigError, ForwardSelectionError) as error:
+                active_names = tuple(
+                    forward.name
+                    for forward in ForwardRegistry().list_active()
+                    if forward.name is not None
+                )
+                selected_names = select_forwards(saved_names, active_names=active_names)
+            except (
+                ForwardConfigError,
+                ForwardRegistryError,
+                ForwardSelectionError,
+            ) as error:
                 print(f"awsi: error: {error}", file=sys.stderr)
                 return 1
             exit_code = 0

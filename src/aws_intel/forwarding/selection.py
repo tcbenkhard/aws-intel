@@ -17,6 +17,7 @@ class ForwardSelectionError(RuntimeError):
 def select_forwards(
     names: Sequence[str],
     *,
+    active_names: Sequence[str] = (),
     input: Input | None = None,
     output: Output | None = None,
 ) -> tuple[str, ...]:
@@ -24,9 +25,18 @@ def select_forwards(
     if not names:
         raise ForwardSelectionError("no forwards are configured")
 
+    active = frozenset(active_names)
+    choices = [
+        questionary.Choice(
+            title=f"{name} (active)" if name in active else name,
+            value=name,
+            disabled="already active" if name in active else None,
+        )
+        for name in names
+    ]
     selected = prompt_choices(
         "Select forwards (space to toggle, enter to confirm):",
-        list(names),
+        choices,
         error_type=ForwardSelectionError,
         non_interactive_message=(
             "a forward is required when input is not an interactive terminal"
