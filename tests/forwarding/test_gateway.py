@@ -1,6 +1,7 @@
 """Tests for the AWS CLI SSM forwarding gateway."""
 
 import json
+import socket
 import subprocess
 from types import SimpleNamespace
 
@@ -134,6 +135,36 @@ def test_rejects_an_unavailable_local_port() -> None:
         )
 
     assert started is False
+
+
+def test_port_availability_check_allows_reuse_of_released_socket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[object, ...]] = []
+
+    class FakeSocket:
+        def __enter__(self) -> "FakeSocket":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def setsockopt(self, *args: object) -> None:
+            calls.append(args)
+
+        def bind(self, address: tuple[str, int]) -> None:
+            calls.append(address)
+
+    monkeypatch.setattr(
+        "aws_intel.forwarding.gateway.socket.socket",
+        lambda *args: FakeSocket(),
+    )
+
+    assert AwsCliForwardingGateway._is_local_port_available(9072) is True
+    assert calls == [
+        (socket.SOL_SOCKET, socket.SO_REUSEADDR, 1),
+        ("127.0.0.1", 9072),
+    ]
 
 
 def test_reports_missing_aws_cli_when_starting_forward() -> None:

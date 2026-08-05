@@ -26,6 +26,9 @@ def select_forwards(
         raise ForwardSelectionError("no forwards are configured")
 
     active = frozenset(active_names)
+    if all(name in active for name in names):
+        raise ForwardSelectionError("all configured forwards are already active")
+
     choices = [
         questionary.Choice(
             title=name,

@@ -123,12 +123,40 @@ def test_terminates_forward_by_name_or_pid(
         "aws_intel.forwarding.registry.os.killpg",
         lambda pid, value: signals.append((pid, value)),
     )
+    monkeypatch.setattr(registry, "_wait_for_process_group_exit", lambda pid: True)
 
     stopped = registry.terminate(reference)
 
     assert stopped.pid == expected_pid
-    assert signals == [(expected_pid, signal.SIGKILL)]
+    assert signals == [(expected_pid, signal.SIGINT)]
     assert all(item.pid != expected_pid for item in registry.list_active())
+
+
+def test_force_kills_forward_that_does_not_exit_after_sigint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry = ForwardRegistry(tmp_path / "forwards.json")
+    forward = ActiveForward(
+        101, "i-11111111", "db.internal", PortMapping(1, 2), "database"
+    )
+    registry.add(forward)
+    signals: list[tuple[int, signal.Signals]] = []
+    waits = iter((False, True))
+    monkeypatch.setattr(
+        "aws_intel.forwarding.registry.os.kill", lambda pid, value: None
+    )
+    monkeypatch.setattr(
+        "aws_intel.forwarding.registry.os.killpg",
+        lambda pid, value: signals.append((pid, value)),
+    )
+    monkeypatch.setattr(
+        registry, "_wait_for_process_group_exit", lambda pid: next(waits)
+    )
+
+    registry.terminate("database")
+
+    assert signals == [(101, signal.SIGINT), (101, signal.SIGKILL)]
+    assert registry.list_active() == ()
 
 
 def test_name_match_takes_precedence_over_numeric_pid(
@@ -147,6 +175,7 @@ def test_name_match_takes_precedence_over_numeric_pid(
         "aws_intel.forwarding.registry.os.killpg",
         lambda pid, value: terminated.append(pid),
     )
+    monkeypatch.setattr(registry, "_wait_for_process_group_exit", lambda pid: True)
 
     registry.terminate("202")
 

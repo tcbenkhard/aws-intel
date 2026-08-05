@@ -74,7 +74,9 @@ def test_active_forward_has_a_single_active_status(
         "aws_intel.forwarding.selection.prompt_choices", capture_choices
     )
 
-    select_forwards(("apigateway-dev",), active_names=("apigateway-dev",))
+    select_forwards(
+        ("apigateway-dev", "database"), active_names=("apigateway-dev",)
+    )
 
     assert captured_choices[0].title == "apigateway-dev"
     assert captured_choices[0].disabled == "active"
@@ -93,6 +95,20 @@ def test_rejects_empty_forward_list() -> None:
     with _typed("") as pipe_input:
         with pytest.raises(ForwardSelectionError, match="no forwards are configured"):
             select_forwards((), input=pipe_input, output=DummyOutput())
+
+
+def test_rejects_forward_list_when_every_forward_is_active() -> None:
+    with _typed("") as pipe_input:
+        with pytest.raises(
+            ForwardSelectionError,
+            match="all configured forwards are already active",
+        ):
+            select_forwards(
+                ("apigateway-dev", "database"),
+                active_names=("apigateway-dev", "database"),
+                input=pipe_input,
+                output=DummyOutput(),
+            )
 
 
 def test_rejects_confirming_without_toggling_any_choice() -> None:

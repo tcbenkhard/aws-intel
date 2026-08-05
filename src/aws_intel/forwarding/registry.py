@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import signal
 from tempfile import NamedTemporaryFile
+import time
 
 from aws_intel.forwarding.model import ActiveForward, PortMapping
 
@@ -19,6 +20,9 @@ class ForwardNotFoundError(ForwardRegistryError):
 
 class ForwardRegistry:
     """Store forwards launched by awsi and discard completed processes."""
+
+    _SHUTDOWN_TIMEOUT_SECONDS = 2.0
+    _SHUTDOWN_POLL_INTERVAL_SECONDS = 0.05
 
     def __init__(self, path: Path | None = None) -> None:
         self._path = path or self._default_path()
@@ -50,11 +54,11 @@ class ForwardRegistry:
                 )
 
     def terminate(self, reference: str) -> ActiveForward:
-        """Terminate one active forward, resolving names before process IDs."""
+        """Stop one forward gracefully, escalating if it does not exit promptly."""
         forwards = list(self.list_active())
         selected = self.resolve(reference, tuple(forwards))
         try:
-            os.killpg(selected.pid, signal.SIGKILL)
+            os.killpg(selected.pid, signal.SIGINT)
         except ProcessLookupError as error:
             self._write([forward for forward in forwards if forward != selected])
             raise ForwardNotFoundError(
@@ -64,8 +68,44 @@ class ForwardRegistry:
             raise ForwardRegistryError(
                 f"permission denied while terminating forward {reference!r}"
             ) from error
+
+        if not self._wait_for_process_group_exit(selected.pid):
+            try:
+                os.killpg(selected.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except PermissionError as error:
+                raise ForwardRegistryError(
+                    f"permission denied while forcefully terminating forward "
+                    f"{reference!r}"
+                ) from error
+            if not self._wait_for_process_group_exit(selected.pid):
+                raise ForwardRegistryError(
+                    f"forward {reference!r} did not stop after SIGKILL"
+                )
+
         self._write([forward for forward in forwards if forward != selected])
         return selected
+
+    @classmethod
+    def _wait_for_process_group_exit(cls, pid: int) -> bool:
+        deadline = time.monotonic() + cls._SHUTDOWN_TIMEOUT_SECONDS
+        while cls._is_process_group_running(pid):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            time.sleep(min(cls._SHUTDOWN_POLL_INTERVAL_SECONDS, remaining))
+        return True
+
+    @staticmethod
+    def _is_process_group_running(pid: int) -> bool:
+        try:
+            os.killpg(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
 
     def resolve(
         self,
