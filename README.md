@@ -1,411 +1,345 @@
-# aws-intel
+# AWS Intel
 
-`aws-intel` is a command-line tool for retrieving useful information from AWS.
-
-The project is in its initial development stage.
-
-Every invocation checks PyPI for a newer release. When an update is available,
-`awsi` writes a short upgrade notice to standard error so command output on
-standard output remains safe to pipe or parse. The check has a one-second
-timeout and is silently skipped when PyPI cannot be reached.
+AWS Intel (`awsi`) is a command-line utility for signing in to AWS accounts,
+inspecting security-group relationships, opening the AWS Management Console,
+and managing SSM port-forwarding sessions.
 
 ## Requirements
 
 - Python 3.10 or newer
-- [Poetry](https://python-poetry.org/)
+- [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
 
-## Development
+## Installation
 
-Install the project and its development dependencies:
-
-```shell
-poetry install
-```
-
-Run the CLI:
+Install the latest release with [pipx](https://pipx.pypa.io/), which keeps the
+application in an isolated environment while making `awsi` available on your
+`PATH`:
 
 ```shell
-poetry run awsi --help
+pipx install aws-intel
 ```
 
-Commands follow this structure:
-
-```text
-awsi <utility> <options>
-```
-
-List all available utilities and their descriptions, or show detailed help for
-one utility:
+Alternatively, install it into the current Python environment:
 
 ```shell
+python -m pip install aws-intel
+```
+
+Verify the installation:
+
+```shell
+awsi --version
 awsi help
-awsi help security-group-tree
-awsi help forward
-awsi help login
-awsi help console
-awsi help init
 ```
 
-Generate boilerplate `.awsi/accounts.yaml` and `.awsi/forwards.yaml` files
-populated with anonymized, plausible-looking example values, ready to edit
-into a real configuration:
+Every invocation performs a one-second PyPI version check. If a newer release
+is available, the upgrade notice is written to standard error; command output
+on standard output remains safe to pipe or parse. An unavailable PyPI endpoint
+does not prevent the command from running.
+
+## Quick start
+
+Create example configuration files in the current directory:
 
 ```shell
 awsi init
 ```
 
-Existing files are left untouched unless `--force` is passed:
+This creates `.awsi/accounts.yaml` and `.awsi/forwards.yaml`. Existing files
+are preserved. To replace both files with fresh examples, use:
 
 ```shell
 awsi init --force
 ```
 
-Open a shell authenticated to an account defined in `.awsi/accounts.yaml`:
+Edit the generated values, then sign in and verify the active identity:
 
 ```shell
-awsi login example-development
+awsi login example-chained
 aws sts get-caller-identity
 exit
 ```
 
-List the accounts available in the current configuration without logging in:
+Configuration is resolved relative to the current working directory. Run
+`awsi` from the directory containing `.awsi`.
 
-```shell
-awsi login --list
-```
+## Configuration
 
-When an account defines a temporary TEAM role, request access through TEAM and
-open an elevated shell after the request becomes active:
+### AWS accounts
 
-```shell
-awsi login example-development --elevated
-```
+`.awsi/accounts.yaml` defines the accounts available to `awsi login`. A root
+account authenticates directly with IAM Identity Center. A chained account
+names another account as its `source`; AWS Intel signs in through the root and
+assumes each configured role in order.
 
-When run without an account name in an interactive terminal, `awsi login`
-shows the configured accounts and asks which one to use. If the selected
-account defines TEAM elevated access, it also asks which access level to use:
+#### Complete `accounts.yaml` example
 
-```text
-$ awsi login
-Select an AWS account:
-  1. example-hub
-  2. example-development
-Account [1-2]: 2
-Select access role:
-  1. standard-access (standard access)
-  2. elevated-access (TEAM elevated)
-Access [1-2]: 2
-```
-
-Press Escape, Ctrl+C, or Ctrl+D to cancel either interactive selection.
-
-After authentication, `awsi` reports the exact expiration returned by AWS and
-the time remaining before it opens the authenticated shell. It also prefixes
-the shell prompt with the active role and account name.
-
-From inside that authenticated shell, open the AWS Management Console with the
-same account and role in the default browser:
-
-```shell
-awsi console
-```
-
-The temporary console sign-in URL is opened directly and is never printed.
-
-If a zsh theme replaces the prompt supplied by `awsi login`, add this line to
-`~/.zshrc` so the account label is applied after the theme loads:
-
-```zsh
-eval "$(awsi shell-init zsh)"
-```
-
-For example, an authenticated prompt will start with:
-
-```text
-[standard-access@example-development] user@host project %
-```
-
-The normal prompt is unchanged outside an `awsi login` shell.
-
-The root account contains its IAM Identity Center details. An account with a
-`source` first obtains credentials for that source and then assumes its own
-configured role:
+The two definitions below collectively demonstrate every supported option.
+Replace all example values with values for your AWS environment.
 
 ```yaml
 version: 1
 
 accounts:
-  example-hub:
+  example-source:
     account_id: "111111111111"
-    role_name: standard-access
+    role_name: ExampleSourceRole
+    region: eu-west-1
     sso_start_url: https://example.awsapps.com/start
     sso_region: eu-west-1
-    region: eu-west-1
-
-  example-development:
-    account_id: "222222222222"
-    role_name: standard-access
-    source: example-hub
-    region: eu-central-1
     elevated_access:
       provider: team
-      role_name: elevated-access
-      source_role: source-elevated-access
+      role_name: ExampleSourceElevatedRole
+
+  example-chained:
+    account_id: "222222222222"
+    role_name: ExampleChainedRole
+    region: eu-central-1
+    source: example-source
+    session_duration_hours: 4
+    elevated_access:
+      provider: team
+      role_name: ExampleChainedElevatedRole
+      source_role: ExampleSourceElevatedRole
 ```
 
-Normal login continues to use the configured read-only role chain. Elevated
-login uses `elevated_access.role_name` for the target account. Source accounts
-retain their configured roles unless `elevated_access.source_role` specifies
-the role to use for those hops. If the TEAM assignment is not active, `awsi`
-tells the user to request TEAM access and retry.
+#### Account options
 
-`awsi` supplies a temporary AWS CLI configuration only while completing the
-SSO login, so an existing `~/.aws/config` is not required or modified. The
-authenticated subshell receives temporary credentials through environment
-variables. They disappear when the shell exits; no credentials are written to
-the repository or to `~/.aws/credentials`.
+| Option | Required | Description |
+| --- | --- | --- |
+| `version` | Yes | Configuration schema version. The only supported value is `1`. |
+| `accounts` | Yes | Mapping of user-defined account names to account definitions. Names are used by `awsi login`. |
+| `account_id` | Yes | The 12-digit AWS account ID. Quote it so YAML treats it as a string. |
+| `role_name` | Yes | IAM role used for standard access to this account. |
+| `region` | No | AWS Region used after login and while assuming this account's role. Defaults to `eu-west-1`. |
+| `source` | Chained accounts only | Name of another entry in `accounts` through which this role is assumed. Chains may contain multiple accounts but may not contain cycles. |
+| `sso_start_url` | Root accounts only | IAM Identity Center access-portal URL. Required on the root of a login chain and invalid when `source` is set. |
+| `sso_region` | Root accounts only | Region containing the IAM Identity Center configuration. Required on the root of a login chain and invalid when `source` is set. |
+| `session_duration_hours` | No | Requested role-session duration for a chained account, as an integer from `1` through `12`. Invalid on a root account. The role's configured maximum duration still applies. |
+| `elevated_access` | No | TEAM elevated-access settings for this account. |
+| `elevated_access.provider` | With `elevated_access` | Elevated-access provider. The only supported value is `team`. |
+| `elevated_access.role_name` | With `elevated_access` | Elevated role used in the target account. |
+| `elevated_access.source_role` | No | Role to use for every source-account hop during elevated login. If omitted, source accounts retain their normal `role_name`. |
 
-For example:
+The root account must contain `sso_start_url` and `sso_region`. Other accounts
+in the chain must use `source` instead. Temporary credentials are placed only
+in the authenticated subshell environment; AWS Intel does not modify
+`~/.aws/config` or write credentials to the repository or
+`~/.aws/credentials`.
 
-```shell
-awsi security-group-tree sg-0123456789abcdef0
-```
+### Saved port forwards
 
-`security-group-tree` recursively displays security groups, their attached
-resources, IPv4 and IPv6 ranges, and managed prefix lists connected through
-inbound and outbound rules. Each connection is prefixed with its protocol and
-port or port range and its direction, such as `tcp 443 from 10.0.0.0/8` for an
-inbound rule or `udp 1000-2000 to 10.0.0.0/8` for an outbound rule. Attached
-resources are grouped under `Assigned to`, inbound connections under `Sources`,
-and outbound connections under `Targets`. Resource discovery includes
-AWS-managed network interfaces. Resource `Name` tags are displayed when
-available, with existing descriptions or IDs used as fallbacks. This requires
-permission to call `ec2:DescribeNetworkInterfaces` and `ec2:DescribeTags`.
-Referenced security groups are displayed as `sg-0123456789abcdef0 (name)` so
-the rule's actual source or target identifier appears before its descriptive
-name.
+`.awsi/forwards.yaml` defines reusable SSM port-forwarding connections. Each
+forward selects its bastion by either EC2 instance ID or exact EC2 `Name` tag.
 
-For RFC 1918 IPv4 ranges, the command also lists network interfaces in the
-security group's VPC whose primary or secondary private address is within the
-range. Each match includes its concrete private IP address. Public IPv4 and
-IPv6 ranges are not resolved, and resources in other accounts, Regions, peered
-VPCs, transit networks, or on-premises networks are outside the lookup scope.
+#### Complete `forwards.yaml` example
 
-The command uses the active AWS CLI credentials and region. Limit output to one
-direction with `--inbound` or `--outbound`; the flags are mutually exclusive.
-Filter the displayed tree with `--filter TEXT`. Matching is case-insensitive;
-matching nodes retain their descendants, and ancestor paths are retained for
-context. The `Assigned to` metadata for security groups on a matching path is
-also retained. For example, `--filter acc` finds labels containing `ACC`.
-Control recursive security-group expansion with `--depth DEPTH`. The default
-depth is 1, which shows resources and rules inside the starting security group
-without expanding the contents of referenced groups. The maximum is 3 because
-each expanded group and private network can require additional AWS API calls,
-and the number of referenced groups can grow rapidly at each level.
-Interactive terminals show a loading indicator while AWS resources are being
-retrieved. The indicator is written to standard error and is disabled when
-output is redirected or piped.
-
-Start an SSM port forwarding session through an online, SSM-managed EC2
-instance to a host reachable from that instance:
-
-```shell
-awsi forward start primary-database \
-  --instance-id=i-0123456789abcdef0 \
-  --host=db.internal --port=5432:5432
-```
-
-The bastion can also be selected by its exact EC2 `Name` tag, which remains
-stable when an instance is replaced:
-
-```shell
-awsi forward start database --instance-name=public-bastion \
-  --host=db.internal --port=5432:5432
-```
-
-Only active (`pending` or `running`) instances are considered. The command
-fails rather than choosing arbitrarily if multiple active instances have the
-same `Name` tag. `--instance-id` and `--instance-name` are mutually exclusive.
-
-The first port is the local listening port and the second is the remote host's
-port. The command uses the
-`AWS-StartPortForwardingSessionToRemoteHost` document and starts the session in
-the background, then prints a confirmation containing the process ID. The AWS
-CLI and its Session Manager plugin must be installed.
-
-Before starting, `awsi` rejects an identical forward that is already active
-and verifies that the requested local port is available. The command exits
-with an error instead of launching another session when either check fails.
-
-Save a named forward without resolving the instance or starting a session:
-
-```shell
-awsi forward save apigateway-dev \
-  --instance-name=solo-connect-bastion-dev \
-  --host=internal-apigw-internal-dev-2025348469.eu-west-1.elb.amazonaws.com \
-  --port=9072:9072
-```
-
-The `save` action adds or replaces that name in `.awsi/forwards.yaml` under
-the current working directory without resolving the instance or starting a
-session. The generated configuration looks like this:
+The alternatives `instance-id` and `instance-name` cannot appear in the same
+forward, so this example includes one definition of each kind.
 
 ```yaml
 forwards:
-  apigateway-dev:
-    instance-name: solo-connect-bastion-dev
-    host: internal-apigw-internal-dev-2025348469.eu-west-1.elb.amazonaws.com
-    port: 9072:9072
+  database-by-id:
+    instance-id: i-0123456789abcdef0
+    host: database.internal.example
+    port: 5432:5432
+
+  api-by-name:
+    instance-name: public-bastion
+    host: api.internal.example
+    port: 8080:80
 ```
 
-Start a saved forward by its configuration name:
+#### Forward options
 
-```shell
-awsi forward start apigateway-dev
-```
+| Option | Required | Description |
+| --- | --- | --- |
+| `forwards` | No | Mapping of user-defined forward names to definitions. An omitted or empty mapping means no saved forwards. |
+| `instance-id` | Exactly one selector | EC2 instance ID of the online, SSM-managed bastion. Mutually exclusive with `instance-name`. |
+| `instance-name` | Exactly one selector | Exact EC2 `Name` tag of the online, SSM-managed bastion. The command fails if multiple active instances have that name. Mutually exclusive with `instance-id`. |
+| `host` | Yes | Hostname or IP address reachable from the bastion. |
+| `port` | Yes | TCP mapping in `LOCAL_PORT:REMOTE_PORT` format. Both ports must be integers from `1` through `65535`. |
 
-The command reads `.awsi/forwards.yaml` from the current working directory,
-resolves the configured instance when necessary, and starts the forward using
-the saved host and port mapping.
+Only EC2 instances in `pending` or `running` state are considered when
+resolving `instance-name`. `awsi forward save` can add or replace a definition
+without starting it.
 
-When run without a name or connection options in an interactive terminal,
-`awsi forward start` shows the saved forwards from `.awsi/forwards.yaml` and
-starts the selected one:
+## Command-line usage
+
+Commands use this structure:
 
 ```text
-$ awsi forward start
-Select a forward:
-  1. apigateway-dev
-  2. primary-database
-Forward 'apigateway-dev' started in the background with PID 4321.
+awsi <utility> <options>
 ```
 
-Press Escape, Ctrl+C, or Ctrl+D to cancel the interactive selection.
+Discover utilities and their current options with:
 
-List all saved definitions with:
+```shell
+awsi help
+awsi help login
+awsi help forward
+awsi <utility> --help
+```
+
+### Log in to an AWS account
+
+```shell
+awsi login [ACCOUNT]
+awsi login --list
+awsi login ACCOUNT --elevated
+```
+
+`awsi login` performs IAM Identity Center authentication, resolves the account
+chain, and opens a subshell containing temporary credentials. Exit that shell
+to return to the previous session. With no account in an interactive terminal,
+it prompts for a configured account and, when available, standard or TEAM
+elevated access. Escape, Ctrl+C, and Ctrl+D cancel a selection.
+
+`--list` prints configured account names without logging in. `--elevated` uses
+the account's configured temporary TEAM role; the TEAM assignment must already
+be active.
+
+### Open the AWS Management Console
+
+From a shell opened by `awsi login`, run:
+
+```shell
+awsi console
+```
+
+AWS Intel exchanges the current temporary credentials for a console sign-in
+URL and opens it in the default browser. The URL is never printed.
+
+### Label authenticated zsh sessions
+
+If a zsh theme replaces the prompt set by `awsi login`, add this to `~/.zshrc`:
+
+```zsh
+eval "$(awsi shell-init zsh)"
+```
+
+Authenticated prompts are prefixed with the active role and account, such as
+`[ExampleSourceRole@example-source]`. Prompts outside an AWS Intel login shell
+are unchanged.
+
+### Inspect a security group tree
+
+```shell
+awsi security-group-tree SECURITY_GROUP_ID [SECURITY_GROUP_ID ...] [options]
+```
+
+Examples:
+
+```shell
+awsi security-group-tree sg-0123456789abcdef0
+awsi security-group-tree sg-0123456789abcdef0 --depth 2 --inbound
+awsi security-group-tree sg-0123456789abcdef0 --filter database
+```
+
+Options:
+
+| Option | Description |
+| --- | --- |
+| `--depth DEPTH` | Expand referenced security groups to a depth from `1` to `3`. Default: `1`. |
+| `--filter TEXT` | Case-insensitively retain matching nodes, their descendants, and their ancestor paths. |
+| `--inbound` | Show only inbound connections. Mutually exclusive with `--outbound`. |
+| `--outbound` | Show only outbound connections. Mutually exclusive with `--inbound`. |
+
+The command uses the active AWS CLI credentials and Region. It displays
+attached resources, IPv4 and IPv6 ranges, managed prefix lists, and connected
+security groups. For RFC 1918 IPv4 ranges, it also resolves matching network
+interfaces inside the security group's VPC. This discovery requires
+`ec2:DescribeNetworkInterfaces` and `ec2:DescribeTags` in addition to
+permission to describe security groups and prefix lists.
+
+### Manage SSM port forwards
+
+Start a saved forward:
+
+```shell
+awsi forward start database-by-id
+```
+
+Start an explicitly described forward without saving it:
+
+```shell
+awsi forward start database \
+  --instance-name public-bastion \
+  --host database.internal.example \
+  --port 5432:5432
+```
+
+Save or replace a definition without starting it:
+
+```shell
+awsi forward save database \
+  --instance-id i-0123456789abcdef0 \
+  --host database.internal.example \
+  --port 5432:5432
+```
+
+List and manage forwards:
 
 ```shell
 awsi forward list
-```
-
-List forwards started by `awsi` that still have a running process with:
-
-```shell
+awsi forward hosts
 awsi forward active
-```
-
-The output has a tab-separated header and columns for process ID, optional name
-(`-` when unnamed), bastion instance ID, remote host, and the port mapping.
-Completed forwards are removed from the list:
-
-```text
-PID	NAME	INSTANCE_ID	HOST	PORT
-4321	primary-database	i-0123456789abcdef0	db.internal	5432:5432
-```
-
-End an active forward by its exact name:
-
-```shell
-awsi forward stop primary-database
-```
-
-If no forward has that name, the reference is interpreted as a process ID:
-
-```shell
-awsi forward stop 40234
-```
-
-Stop every active forward with:
-
-```console
+awsi forward stop database
+awsi forward stop 4321
 awsi forward stop --all
-```
-
-When run without a name, PID, or `--all` in an interactive terminal,
-`awsi forward stop` shows only the active forwards and stops the selected
-one:
-
-```text
-$ awsi forward stop
-Select a forward:
-  1. primary-database (PID 4321)
-  2. PID 4322
-Forward 'primary-database' with PID 4321 was terminated.
-```
-
-Press Escape, Ctrl+C, or Ctrl+D to cancel the interactive selection.
-
-Restart an active forward by name or PID, preserving its current connection
-details, or restart every active forward:
-
-```console
-awsi forward restart primary-database
+awsi forward restart database
+awsi forward restart 4321
 awsi forward restart --all
 ```
 
-Only forwards tracked by `awsi` can be terminated. When multiple active
-forwards share a name, use the process ID shown by `--list`.
-List online SSM-managed EC2 instances in the active account and region with:
+Running `awsi forward start` without arguments interactively selects one or
+more saved definitions. Running `awsi forward stop` without a name, PID, or
+`--all` interactively selects active sessions. Active-session output is
+tab-separated and includes a header. AWS Intel rejects duplicate active
+forwards and unavailable local ports before starting a background session.
+
+`awsi forward hosts` requires `ssm:DescribeInstanceInformation` and
+`ec2:DescribeInstances`. Starting a session requires `ssm:StartSession` and
+the associated session-channel permissions.
+
+The legacy forms `awsi forward NAME`, `awsi forward --list`,
+`awsi forward --kill`, and `awsi forward --list-hosts` remain supported for
+backward compatibility. The action-based commands above are recommended.
+
+### Generate configuration
 
 ```shell
-awsi forward hosts
+awsi init [--force]
 ```
 
-The list is tab-separated: instance ID followed by the EC2 `Name` tag when one
-is present. Listing requires `ssm:DescribeInstanceInformation` and
-`ec2:DescribeInstances`; starting a session requires the corresponding
-`ssm:StartSession` and session-channel permissions.
+This writes anonymized examples to `.awsi/accounts.yaml` and
+`.awsi/forwards.yaml` in the current directory. `--force` overwrites existing
+configuration files. The complete examples in the configuration section above
+show every supported field, including mutually exclusive alternatives.
 
-`awsi forward NAME`, `awsi forward --list`, `awsi forward --kill`, and
-`awsi forward --list-hosts` remain available as
-compatibility aliases, but the action-based forms above are the recommended
-interface. Forward names are positional; the former `--name` option is no
-longer supported.
+## Contributing
 
-Supply multiple security group IDs to combine them as sibling roots in one
-tree:
+The project uses [Poetry](https://python-poetry.org/) for development. Clone
+the repository, then install the package and development dependencies:
 
 ```shell
-awsi security-group-tree sg-0123456789abcdef0 sg-11111111111111111
+poetry install
 ```
 
-Run the tests:
+Run the CLI and test suite:
 
 ```shell
+poetry run awsi --help
 poetry run pytest
 ```
 
-Build distribution artifacts:
+Build wheel and source-distribution artifacts with:
 
 ```shell
 poetry build
 ```
 
-## Continuous integration and releases
-
-Pull requests and pushes to `main` run the test suite on the oldest and newest
-supported Python versions. After the tests pass, CI builds the wheel and source
-distribution and stores them as workflow artifacts.
-
-Releases use the **Publish to PyPI** workflow:
-
-1. In the repository's **Actions** tab, select **Publish to PyPI** and choose
-   **Run workflow** from the `main` branch.
-2. Choose `patch`, `minor`, or `major` for the semantic version increment.
-3. Approve the `pypi` environment deployment when prompted.
-
-Before the first release:
-
-- Add the appropriate project authors and license metadata to `pyproject.toml`
-  and confirm that the `aws-intel` name is available on PyPI.
-- Create a GitHub Environment named `pypi` and add the required reviewers whose
-  approval is needed to publish.
-- Configure a PyPI trusted publisher for this repository, the `publish.yml`
-  workflow, and the `pypi` environment. No PyPI API token is required.
-- Ensure repository rules allow GitHub Actions to push the release version
-  commit to `main`.
-
-After approval, the workflow reruns the tests, increments the version in
-`pyproject.toml`, builds the distributions, pushes the version commit to
-`main`, and publishes through PyPI trusted publishing. Only one release
-workflow can run at a time.
+Keep CLI parsing and presentation separate from application logic, isolate AWS
+CLI calls behind integration boundaries, and add deterministic tests for
+behavior changes. Tests must not contact live AWS services unless explicitly
+marked as integration tests.
