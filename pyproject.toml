@@ -1,6 +1,6 @@
 [project]
 name = "aws-intel"
-version = "0.11.0"
+version = "0.11.1"
 description = "A CLI tool for retrieving useful information from AWS."
 readme = "README.md"
 requires-python = ">=3.10,<4.0"
