@@ -209,6 +209,10 @@ to return to the previous session. With no account in an interactive terminal,
 it prompts for a configured account and, when available, standard or TEAM
 elevated access. Escape, Ctrl+C, and Ctrl+D cancel a selection.
 
+An existing, still-valid IAM Identity Center session in the AWS CLI cache is
+reused automatically. Browser approval is requested only when cached
+credentials cannot be exported, for example after the SSO session expires.
+
 `--list` prints configured account names without logging in. `--elevated` uses
 the account's configured temporary TEAM role; the TEAM assignment must already
 be active.

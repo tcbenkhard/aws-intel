@@ -40,12 +40,10 @@ class AwsCliLoginGateway:
             self._write_sso_config(config_path, root)
             bootstrap_environment = dict(os.environ)
             bootstrap_environment["AWS_CONFIG_FILE"] = str(config_path)
-            self._run_interactive(
-                ["aws", "sso", "login", "--profile", "awsi-bootstrap"],
-                bootstrap_environment,
-            )
             try:
-                credentials = self._export_credentials(bootstrap_environment)
+                credentials = self._cached_or_interactive_credentials(
+                    bootstrap_environment
+                )
                 for account in chain[1:]:
                     credentials = self._assume_role(account, credentials)
             except LoginError as error:
@@ -162,6 +160,19 @@ class AwsCliLoginGateway:
             environment,
         )
         return self._credentials(response)
+
+    def _cached_or_interactive_credentials(
+        self, environment: dict[str, str]
+    ) -> Credentials:
+        """Reuse the AWS CLI SSO cache, authenticating only when it is unusable."""
+        try:
+            return self._export_credentials(environment)
+        except LoginError:
+            self._run_interactive(
+                ["aws", "sso", "login", "--profile", "awsi-bootstrap"],
+                environment,
+            )
+            return self._export_credentials(environment)
 
     def _assume_role(self, account: Account, source: Credentials) -> Credentials:
         environment = dict(os.environ)
