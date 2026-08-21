@@ -212,6 +212,10 @@ elevated access. Escape, Ctrl+C, and Ctrl+D cancel a selection.
 An existing, still-valid IAM Identity Center session in the AWS CLI cache is
 reused automatically. Browser approval is requested only when cached
 credentials cannot be exported, for example after the SSO session expires.
+The authenticated shell uses a temporary AWS profile rather than fixed
+credential environment variables. If role credentials expire while that shell
+is open, AWS CLI commands refresh them from the cached Identity Center session;
+browser approval is needed only after that underlying session also expires.
 
 `--list` prints configured account names without logging in. `--elevated` uses
 the account's configured temporary TEAM role; the TEAM assignment must already

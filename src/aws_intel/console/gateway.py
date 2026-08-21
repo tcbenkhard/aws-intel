@@ -2,6 +2,7 @@
 
 from collections.abc import Callable, Mapping
 import json
+import subprocess
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -10,6 +11,7 @@ FEDERATION_ENDPOINT = "https://signin.aws.amazon.com/federation"
 DEFAULT_DESTINATION = "https://console.aws.amazon.com/"
 BrowserOpener = Callable[[str], bool]
 FederationRequester = Callable[[bytes], object]
+CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
 
 
 class ConsoleError(RuntimeError):
@@ -23,21 +25,21 @@ class AwsConsoleGateway:
         self,
         requester: FederationRequester | None = None,
         browser_opener: BrowserOpener = webbrowser.open,
+        runner: CommandRunner = subprocess.run,
     ) -> None:
         self._requester = requester or self._request_signin_token
         self._browser_opener = browser_opener
+        self._runner = runner
 
     def open(self, environment: Mapping[str, str]) -> None:
         """Open the AWS console using credentials from an awsi login shell."""
         account = environment.get("AWSI_ACCOUNT")
-        access_key = environment.get("AWS_ACCESS_KEY_ID")
-        secret_key = environment.get("AWS_SECRET_ACCESS_KEY")
-        session_token = environment.get("AWS_SESSION_TOKEN")
-        if not account or not all((access_key, secret_key, session_token)):
+        if not account:
             raise ConsoleError(
                 "no awsi login session was found; run this command inside the "
                 "shell opened by 'awsi login'"
             )
+        access_key, secret_key, session_token = self._credentials(environment)
 
         session = json.dumps(
             {
@@ -71,6 +73,57 @@ class AwsConsoleGateway:
         login_url = f"{FEDERATION_ENDPOINT}?{login_parameters}"
         if not self._browser_opener(login_url):
             raise ConsoleError("the system browser could not be opened")
+
+    def _credentials(
+        self, environment: Mapping[str, str]
+    ) -> tuple[str, str, str]:
+        existing = tuple(
+            environment.get(name)
+            for name in (
+                "AWS_ACCESS_KEY_ID",
+                "AWS_SECRET_ACCESS_KEY",
+                "AWS_SESSION_TOKEN",
+            )
+        )
+        if all(existing):
+            return existing  # type: ignore[return-value]
+        if not environment.get("AWS_PROFILE"):
+            raise ConsoleError(
+                "no awsi login session was found; run this command inside the "
+                "shell opened by 'awsi login'"
+            )
+        try:
+            result = self._runner(
+                [
+                    "aws",
+                    "configure",
+                    "export-credentials",
+                    "--format",
+                    "process",
+                ],
+                env=dict(environment),
+                capture_output=True,
+                check=False,
+                text=True,
+            )
+        except FileNotFoundError as error:
+            raise ConsoleError("AWS CLI was not found") from error
+        if result.returncode != 0:
+            raise ConsoleError(
+                result.stderr.strip() or "could not refresh AWS credentials"
+            )
+        try:
+            response = json.loads(result.stdout)
+            credentials = (
+                response["AccessKeyId"],
+                response["SecretAccessKey"],
+                response["SessionToken"],
+            )
+            if not all(isinstance(value, str) and value for value in credentials):
+                raise TypeError
+            return credentials
+        except (json.JSONDecodeError, KeyError, TypeError) as error:
+            raise ConsoleError("AWS CLI returned incomplete credentials") from error
 
     @staticmethod
     def _destination(region: str | None) -> str:

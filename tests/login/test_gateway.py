@@ -14,8 +14,10 @@ from aws_intel.login.model import Account
 
 def test_logs_in_assumes_role_and_opens_authenticated_shell(monkeypatch) -> None:
     calls: list[tuple[list[str], dict[str, str]]] = []
+    shell_config = ""
 
     def runner(command, **options):
+        nonlocal shell_config
         environment = options.get("env", {})
         calls.append((command, environment))
         if command[:3] == ["aws", "sso", "login"]:
@@ -56,6 +58,10 @@ def test_logs_in_assumes_role_and_opens_authenticated_shell(monkeypatch) -> None
             return subprocess.CompletedProcess(
                 command, 0, json.dumps({"Account": "222222222222"}), ""
             )
+        if command == ["/bin/test-shell"]:
+            shell_config = Path(environment["AWS_CONFIG_FILE"]).read_text(
+                encoding="utf-8"
+            )
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setenv("SHELL", "/bin/test-shell")
@@ -89,11 +95,17 @@ def test_logs_in_assumes_role_and_opens_authenticated_shell(monkeypatch) -> None
     assert "arn:aws:iam::222222222222:role/standard-access" in assume_command
     shell_command, shell_environment = calls[3]
     assert shell_command == ["/bin/test-shell"]
-    assert shell_environment["AWS_ACCESS_KEY_ID"] == "target-key"
+    assert "AWS_ACCESS_KEY_ID" not in shell_environment
+    assert shell_environment["AWS_PROFILE"] == "awsi-session-1"
+    assert shell_environment["AWS_SDK_LOAD_CONFIG"] == "1"
     assert shell_environment["AWS_REGION"] == "eu-central-1"
     assert shell_environment["AWSI_ACCOUNT"] == "target"
     assert shell_environment["AWSI_ROLE"] == "standard-access"
     assert shell_environment["PS1"].startswith("[standard-access@target] ")
+    assert "[profile awsi-session-0]" in shell_config
+    assert "[profile awsi-session-1]" in shell_config
+    assert "source_profile = awsi-session-0" in shell_config
+    assert "role_arn = arn:aws:iam::222222222222:role/standard-access" in shell_config
 
 
 def test_logs_in_interactively_when_cached_sso_session_is_unusable(

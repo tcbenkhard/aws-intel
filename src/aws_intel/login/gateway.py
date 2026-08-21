@@ -34,34 +34,40 @@ class AwsCliLoginGateway:
         self._clock = clock
 
     def open_shell(self, chain: Sequence[Account], elevated: bool = False) -> int:
-        root = chain[0]
-        with TemporaryDirectory(prefix="awsi-login-") as directory:
-            config_path = Path(directory) / "config"
-            self._write_sso_config(config_path, root)
-            bootstrap_environment = dict(os.environ)
-            bootstrap_environment["AWS_CONFIG_FILE"] = str(config_path)
-            try:
-                credentials = self._cached_or_interactive_credentials(
-                    bootstrap_environment
-                )
-                for account in chain[1:]:
-                    credentials = self._assume_role(account, credentials)
-            except LoginError as error:
-                if elevated:
-                    target = chain[-1]
-                    raise LoginError(
-                        f"could not retrieve elevated role {target.role_name!r} "
-                        f"for {target.name!r}; make sure TEAM access is active "
-                        "and retry"
-                    ) from error
-                raise
+        login_directory = TemporaryDirectory(prefix="awsi-login-")
+        config_path = Path(login_directory.name) / "config"
+        self._write_sso_config(config_path, chain)
+        bootstrap_environment = dict(os.environ)
+        bootstrap_environment["AWS_CONFIG_FILE"] = str(config_path)
+        try:
+            credentials = self._cached_or_interactive_credentials(
+                bootstrap_environment
+            )
+            for account in chain[1:]:
+                credentials = self._assume_role(account, credentials)
+        except LoginError as error:
+            if elevated:
+                target = chain[-1]
+                raise LoginError(
+                    f"could not retrieve elevated role {target.role_name!r} "
+                    f"for {target.name!r}; make sure TEAM access is active "
+                    "and retry"
+                ) from error
+            raise
 
         target = chain[-1]
         self._verify_identity(target, credentials)
         environment = dict(os.environ)
-        for variable in ("AWS_PROFILE", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE"):
+        for variable in (
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "AWS_SHARED_CREDENTIALS_FILE",
+        ):
             environment.pop(variable, None)
-        environment.update(credentials.environment())
+        environment["AWS_CONFIG_FILE"] = str(config_path)
+        environment["AWS_PROFILE"] = self._session_profile_name(len(chain) - 1)
+        environment["AWS_SDK_LOAD_CONFIG"] = "1"
         environment["AWS_REGION"] = target.region
         environment["AWS_DEFAULT_REGION"] = target.region
         environment["AWSI_ACCOUNT"] = target.name
@@ -139,7 +145,8 @@ class AwsCliLoginGateway:
         )
 
     @staticmethod
-    def _write_sso_config(path: Path, account: Account) -> None:
+    def _write_sso_config(path: Path, chain: Sequence[Account]) -> None:
+        account = chain[0]
         parser = configparser.ConfigParser()
         parser["profile awsi-bootstrap"] = {
             "sso_start_url": account.sso_start_url or "",
@@ -148,8 +155,38 @@ class AwsCliLoginGateway:
             "sso_role_name": account.role_name,
             "region": account.region,
         }
+        parser[f"profile {AwsCliLoginGateway._session_profile_name(0)}"] = {
+            "sso_start_url": account.sso_start_url or "",
+            "sso_region": account.sso_region or "",
+            "sso_account_id": account.account_id,
+            "sso_role_name": account.role_name,
+            "region": account.region,
+        }
+        for index, chained_account in enumerate(chain[1:], start=1):
+            profile = {
+                "role_arn": (
+                    f"arn:aws:iam::{chained_account.account_id}:"
+                    f"role/{chained_account.role_name}"
+                ),
+                "source_profile": AwsCliLoginGateway._session_profile_name(index - 1),
+                "role_session_name": AwsCliLoginGateway._session_name(
+                    chained_account.name
+                ),
+                "region": chained_account.region,
+            }
+            if chained_account.session_duration_hours is not None:
+                profile["duration_seconds"] = str(
+                    chained_account.session_duration_hours * 3600
+                )
+            parser[
+                f"profile {AwsCliLoginGateway._session_profile_name(index)}"
+            ] = profile
         with path.open("w", encoding="utf-8") as config_file:
             parser.write(config_file)
+
+    @staticmethod
+    def _session_profile_name(index: int) -> str:
+        return f"awsi-session-{index}"
 
     def _export_credentials(self, environment: dict[str, str]) -> Credentials:
         response = self._run_json(

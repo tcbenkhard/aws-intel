@@ -1,6 +1,7 @@
 """Tests for AWS console federation and browser access."""
 
 import json
+import subprocess
 import urllib.parse
 
 import pytest
@@ -52,6 +53,50 @@ def test_opens_console_with_current_session_credentials() -> None:
 def test_requires_an_awsi_login_shell() -> None:
     with pytest.raises(ConsoleError, match="no awsi login session was found"):
         AwsConsoleGateway(lambda _body: {}, lambda _url: True).open({})
+
+
+def test_exports_refreshable_profile_credentials() -> None:
+    request_bodies: list[bytes] = []
+
+    def runner(command, **options):
+        assert command == [
+            "aws", "configure", "export-credentials", "--format", "process"
+        ]
+        assert options["env"]["AWS_PROFILE"] == "awsi-session-1"
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            json.dumps(
+                {
+                    "AccessKeyId": "refreshed-key",
+                    "SecretAccessKey": "refreshed-secret",
+                    "SessionToken": "refreshed-token",
+                    "Expiration": "2026-08-21T12:00:00Z",
+                }
+            ),
+            "",
+        )
+
+    gateway = AwsConsoleGateway(
+        lambda body: request_bodies.append(body) or {"SigninToken": "token"},
+        lambda _url: True,
+        runner,
+    )
+
+    gateway.open(
+        {
+            "AWSI_ACCOUNT": "development",
+            "AWS_PROFILE": "awsi-session-1",
+            "AWS_CONFIG_FILE": "/temporary/config",
+        }
+    )
+
+    request = urllib.parse.parse_qs(request_bodies[0].decode("utf-8"))
+    assert json.loads(request["Session"][0]) == {
+        "sessionId": "refreshed-key",
+        "sessionKey": "refreshed-secret",
+        "sessionToken": "refreshed-token",
+    }
 
 
 def test_rejects_an_invalid_federation_response() -> None:
