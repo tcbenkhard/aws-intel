@@ -54,6 +54,20 @@ FORWARD_ACTIONS = {
     "list",
     "configs",
 }
+UTILITY_ALIASES = {
+    "l": "login",
+    "c": "console",
+    "f": "forward",
+}
+FORWARD_ACTION_ALIASES = {
+    "st": "start",
+    "sp": "stop",
+    "a": "active",
+    "l": "list",
+    "r": "restart",
+    "sv": "save",
+    "h": "hosts",
+}
 
 
 class AwsIntelArgumentParser(argparse.ArgumentParser):
@@ -156,6 +170,17 @@ def _normalize_forward_arguments(arguments: Sequence[str]) -> list[str]:
     return ["forward", "start", *legacy]
 
 
+def _normalize_command_aliases(arguments: Sequence[str]) -> list[str]:
+    """Translate explicit utility and forward action aliases."""
+    normalized = list(arguments)
+    if not normalized:
+        return normalized
+    normalized[0] = UTILITY_ALIASES.get(normalized[0], normalized[0])
+    if normalized[0] == "forward" and len(normalized) > 1:
+        normalized[1] = FORWARD_ACTION_ALIASES.get(normalized[1], normalized[1])
+    return normalized
+
+
 def create_parser() -> AwsIntelArgumentParser:
     """Create the application's argument parser."""
     parser = AwsIntelArgumentParser(
@@ -236,6 +261,7 @@ def create_parser() -> AwsIntelArgumentParser:
     )
     forward = utilities.add_parser(
         "forward",
+        aliases=["f"],
         prog="awsi forward",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="Forward a local port through an SSM-managed EC2 instance.",
@@ -263,6 +289,7 @@ def create_parser() -> AwsIntelArgumentParser:
     )
     forward_start = forward_actions.add_parser(
         "start",
+        aliases=["st"],
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="Start a saved or explicitly described forward.",
         epilog=(
@@ -288,6 +315,7 @@ def create_parser() -> AwsIntelArgumentParser:
     _add_forward_connection_arguments(forward_start)
     forward_save = forward_actions.add_parser(
         "save",
+        aliases=["sv"],
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="Save a forward without starting it.",
         epilog=(
@@ -304,12 +332,14 @@ def create_parser() -> AwsIntelArgumentParser:
     _add_forward_connection_arguments(forward_save)
     forward_actions.add_parser(
         "active",
+        aliases=["a"],
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="List active forwarding sessions.",
         epilog="Example:\n  awsi forward active",
     )
     forward_stop = forward_actions.add_parser(
         "stop",
+        aliases=["sp"],
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="Stop one or all active forwards.",
         epilog=(
@@ -330,6 +360,7 @@ def create_parser() -> AwsIntelArgumentParser:
     )
     forward_restart = forward_actions.add_parser(
         "restart",
+        aliases=["r"],
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="Restart one or all active forwards.",
         epilog=(
@@ -346,19 +377,21 @@ def create_parser() -> AwsIntelArgumentParser:
     )
     forward_actions.add_parser(
         "hosts",
+        aliases=["h"],
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="List online SSM-managed EC2 bastion hosts.",
         epilog="Example:\n  awsi forward hosts",
     )
     forward_actions.add_parser(
         "list",
-        aliases=["configs"],
+        aliases=["l", "configs"],
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="List saved forwarding configurations.",
         epilog="Example:\n  awsi forward list",
     )
     login = utilities.add_parser(
         "login",
+        aliases=["l"],
         prog="awsi login",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="Open a shell authenticated to a configured AWS account.",
@@ -392,6 +425,7 @@ def create_parser() -> AwsIntelArgumentParser:
     )
     utilities.add_parser(
         "console",
+        aliases=["c"],
         prog="awsi console",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="Open the AWS Console for the current awsi login session.",
@@ -490,7 +524,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
     notify_if_update_available(__version__)
     parser = create_parser()
     raw_arguments = list(sys.argv[1:] if arguments is None else arguments)
-    parsed = parser.parse_args(_normalize_forward_arguments(raw_arguments))
+    normalized_arguments = _normalize_command_aliases(raw_arguments)
+    parsed = parser.parse_args(_normalize_forward_arguments(normalized_arguments))
     if parsed.utility == "help":
         if parsed.help_utility is None:
             parser.print_help()

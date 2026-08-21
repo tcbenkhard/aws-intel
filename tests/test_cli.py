@@ -11,7 +11,7 @@ from aws_intel.security_groups.model import (
     SecurityGroup,
     SecurityGroupConnection,
 )
-from aws_intel.cli import main
+from aws_intel.cli import _normalize_command_aliases, main
 from aws_intel.forwarding.config import ForwardConfig
 from aws_intel.forwarding.model import ActiveForward, BastionHost, PortMapping
 from aws_intel.forwarding.registry import ForwardRegistryError
@@ -87,6 +87,48 @@ def test_help_utility_rejects_unknown_utility(
 
     assert exit_info.value.code == 2
     assert "invalid choice: 'unknown'" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("arguments", "normalized"),
+    [
+        (["l", "development", "--elevated"], ["login", "development", "--elevated"]),
+        (["c"], ["console"]),
+        (["f", "st", "database"], ["forward", "start", "database"]),
+        (["f", "sp", "database"], ["forward", "stop", "database"]),
+        (["f", "a"], ["forward", "active"]),
+        (["f", "l"], ["forward", "list"]),
+        (["f", "r", "database"], ["forward", "restart", "database"]),
+        (["f", "sv", "database"], ["forward", "save", "database"]),
+        (["f", "h"], ["forward", "hosts"]),
+    ],
+)
+def test_command_aliases_are_normalized(
+    arguments: list[str], normalized: list[str]
+) -> None:
+    assert _normalize_command_aliases(arguments) == normalized
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["l", "--help"],
+        ["c", "--help"],
+        ["f", "--help"],
+        ["f", "st", "--help"],
+        ["f", "sp", "--help"],
+        ["f", "a", "--help"],
+        ["f", "l", "--help"],
+        ["f", "r", "--help"],
+        ["f", "sv", "--help"],
+        ["f", "h", "--help"],
+    ],
+)
+def test_command_alias_help_exits_successfully(arguments: list[str]) -> None:
+    with pytest.raises(SystemExit) as exit_info:
+        main(arguments)
+
+    assert exit_info.value.code == 0
 
 
 @pytest.mark.parametrize(

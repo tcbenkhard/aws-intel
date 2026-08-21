@@ -195,6 +195,23 @@ awsi help forward
 awsi <utility> --help
 ```
 
+Frequently used utilities and forward actions have explicit shorthands:
+
+| Command | Shorthand |
+| --- | --- |
+| `awsi login` | `awsi l` |
+| `awsi console` | `awsi c` |
+| `awsi forward` | `awsi f` |
+| `awsi forward start` | `awsi f st` |
+| `awsi forward stop` | `awsi f sp` |
+| `awsi forward active` | `awsi f a` |
+| `awsi forward list` | `awsi f l` |
+| `awsi forward restart` | `awsi f r` |
+| `awsi forward save` | `awsi f sv` |
+| `awsi forward hosts` | `awsi f h` |
+
+Shorthands accept the same arguments and options as their full commands.
+
 ### Log in to an AWS account
 
 ```shell
