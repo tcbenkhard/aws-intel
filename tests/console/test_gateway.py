@@ -99,6 +99,87 @@ def test_exports_refreshable_profile_credentials() -> None:
     }
 
 
+def test_logs_in_interactively_when_cached_sso_session_is_unusable() -> None:
+    calls: list[list[str]] = []
+    export_attempts = 0
+
+    def runner(command, **options):
+        nonlocal export_attempts
+        calls.append(command)
+        if command[:3] == ["aws", "configure", "export-credentials"]:
+            export_attempts += 1
+            if export_attempts == 1:
+                return subprocess.CompletedProcess(
+                    command, 255, "", "The SSO session has expired"
+                )
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                json.dumps(
+                    {
+                        "AccessKeyId": "refreshed-key",
+                        "SecretAccessKey": "refreshed-secret",
+                        "SessionToken": "refreshed-token",
+                        "Expiration": "2026-08-21T12:00:00Z",
+                    }
+                ),
+                "",
+            )
+        if command[:3] == ["aws", "sso", "login"]:
+            return subprocess.CompletedProcess(command, 0)
+        raise AssertionError(f"unexpected command: {command}")
+
+    request_bodies: list[bytes] = []
+    gateway = AwsConsoleGateway(
+        lambda body: request_bodies.append(body) or {"SigninToken": "token"},
+        lambda _url: True,
+        runner,
+    )
+
+    gateway.open(
+        {
+            "AWSI_ACCOUNT": "development",
+            "AWS_PROFILE": "awsi-session-1",
+            "AWS_CONFIG_FILE": "/temporary/config",
+        }
+    )
+
+    assert [command[:3] for command in calls] == [
+        ["aws", "configure", "export-credentials"],
+        ["aws", "sso", "login"],
+        ["aws", "configure", "export-credentials"],
+    ]
+    assert calls[1] == ["aws", "sso", "login", "--profile", "awsi-session-1"]
+    request = urllib.parse.parse_qs(request_bodies[0].decode("utf-8"))
+    assert json.loads(request["Session"][0]) == {
+        "sessionId": "refreshed-key",
+        "sessionKey": "refreshed-secret",
+        "sessionToken": "refreshed-token",
+    }
+
+
+def test_reports_sso_login_failure_during_refresh() -> None:
+    def runner(command, **options):
+        if command[:3] == ["aws", "configure", "export-credentials"]:
+            return subprocess.CompletedProcess(
+                command, 255, "", "The SSO session has expired"
+            )
+        if command[:3] == ["aws", "sso", "login"]:
+            return subprocess.CompletedProcess(command, 1)
+        raise AssertionError(f"unexpected command: {command}")
+
+    gateway = AwsConsoleGateway(lambda _body: {}, lambda _url: True, runner)
+
+    with pytest.raises(ConsoleError, match="AWS SSO login failed"):
+        gateway.open(
+            {
+                "AWSI_ACCOUNT": "development",
+                "AWS_PROFILE": "awsi-session-1",
+                "AWS_CONFIG_FILE": "/temporary/config",
+            }
+        )
+
+
 def test_rejects_an_invalid_federation_response() -> None:
     gateway = AwsConsoleGateway(lambda _body: {}, lambda _url: True)
 

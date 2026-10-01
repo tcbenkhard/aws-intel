@@ -87,11 +87,21 @@ class AwsConsoleGateway:
         )
         if all(existing):
             return existing  # type: ignore[return-value]
-        if not environment.get("AWS_PROFILE"):
+        profile = environment.get("AWS_PROFILE")
+        if not profile:
             raise ConsoleError(
                 "no awsi login session was found; run this command inside the "
                 "shell opened by 'awsi login'"
             )
+        try:
+            return self._export_credentials(environment)
+        except ConsoleError:
+            self._refresh_sso_session(profile, environment)
+            return self._export_credentials(environment)
+
+    def _export_credentials(
+        self, environment: Mapping[str, str]
+    ) -> tuple[str, str, str]:
         try:
             result = self._runner(
                 [
@@ -124,6 +134,21 @@ class AwsConsoleGateway:
             return credentials
         except (json.JSONDecodeError, KeyError, TypeError) as error:
             raise ConsoleError("AWS CLI returned incomplete credentials") from error
+
+    def _refresh_sso_session(
+        self, profile: str, environment: Mapping[str, str]
+    ) -> None:
+        """Re-authenticate an expired SSO session, mirroring 'awsi login'."""
+        try:
+            result = self._runner(
+                ["aws", "sso", "login", "--profile", profile],
+                env=dict(environment),
+                check=False,
+            )
+        except FileNotFoundError as error:
+            raise ConsoleError("AWS CLI was not found") from error
+        if result.returncode != 0:
+            raise ConsoleError("AWS SSO login failed")
 
     @staticmethod
     def _destination(region: str | None) -> str:
